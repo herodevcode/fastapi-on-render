@@ -12,6 +12,16 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List
 
+from models import (
+    AttributeValue, 
+    PromptFieldBatchRequest, 
+    BubbleRecordCreate, 
+    BubbleRecordBatchCreate, 
+    BubbleRecordUpdateListField, 
+    GeneratedPromptCreate, 
+    GeneratedPromptBatchCreate
+)
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,32 +48,32 @@ BUBBLE_PROMPTFIELD_DATA_TYPE = os.getenv("BUBBLE_PROMPTFIELD_DATA_TYPE")
 BUBBLE_GENERATEDPROMPT_DATA_TYPE = os.getenv("BUBBLE_GENERATEDPROMPT_DATA_TYPE")
 BUBBLE_ENVIRONMENT = os.getenv("BUBBLE_ENVIRONMENT", "production")
 
-def get_bubble_base_url():
+def get_bubble_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble API based on environment"""
     if not BUBBLE_APP_DOMAIN or not BUBBLE_SAMPLE_DATA_TYPE:
         return None
     
-    if BUBBLE_ENVIRONMENT == "version-test":
+    if environment == "version-test":
         return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_SAMPLE_DATA_TYPE}"
     else:
         return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_SAMPLE_DATA_TYPE}"
 
-def get_bubble_promptfield_base_url():
+def get_bubble_promptfield_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble PromptField API based on environment"""
     if not BUBBLE_APP_DOMAIN or not BUBBLE_PROMPTFIELD_DATA_TYPE:
         return None
     
-    if BUBBLE_ENVIRONMENT == "version-test":
+    if environment == "version-test":
         return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_PROMPTFIELD_DATA_TYPE}"
     else:
         return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_PROMPTFIELD_DATA_TYPE}"
 
-def get_bubble_generatedprompt_base_url():
+def get_bubble_generatedprompt_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble GeneratedPrompt API based on environment"""
     if not BUBBLE_APP_DOMAIN or not BUBBLE_GENERATEDPROMPT_DATA_TYPE:
         return None
     
-    if BUBBLE_ENVIRONMENT == "version-test":
+    if environment == "version-test":
         return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_GENERATEDPROMPT_DATA_TYPE}"
     else:
         return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_GENERATEDPROMPT_DATA_TYPE}"
@@ -76,127 +86,6 @@ async def get_api_key(api_key: str = Depends(api_key_header)):
         )
     return api_key
 
-class BubbleRecordCreate(BaseModel):
-    """Model for creating a new record in Bubble database"""
-    name: str
-    description: str
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "name": "Sample Record",
-                "description": "This is a sample description for the record"
-            }
-        }
-
-class BubbleRecordBatchCreate(BaseModel):
-    """Model for batch creating records in Bubble database"""
-    records: List[BubbleRecordCreate]
-    
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "records": [
-                    {
-                        "name": "string",
-                        "description": "string"
-                    },
-                    {
-                        "name": "string",
-                        "description": "string"
-                    }
-                ]
-            }
-        }
-    }
-
-class BubbleRecordUpdateListField(BaseModel):
-    """Model for updating a list field in a Bubble record"""
-    sample2_id: str
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "sample2_id": "1755912306378x688197843685340200"
-            }
-        }
-
-class AttributeValue(BaseModel):
-    """Model for attribute-value pair"""
-    attribute: str
-    value: str
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "attribute": "subject",
-                "value": "A complete description of the primary and secondary subjects, including their appearance, attire, and actions."
-            }
-        }
-
-class PromptFieldBatchRequest(BaseModel):
-    """Model for batch processing PromptField attributes"""
-    attributes: List[AttributeValue]
-    
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "attributes": [
-                    {
-                        "attribute": "subject",
-                        "value": "A complete description of the primary and secondary subjects, including their appearance, attire, and actions."
-                    },
-                    {
-                        "attribute": "composition",
-                        "value": "A description of the shot type, camera angle, and framing, including layout details like foreground/background and use of compositional rules."
-                    },
-                    {
-                        "attribute": "environment",
-                        "value": "A description of the location, time of day, weather, and overall atmosphere."
-                    },
-                    {
-                        "attribute": "style",
-                        "value": "A description of the medium (e.g., photo, painting), artistic look, lighting, color palette, and any technical details like depth of field or film grain."
-                    }
-                ]
-            }
-        }
-    }
-
-class GeneratedPromptCreate(BaseModel):
-    """Model for creating a new GeneratedPrompt record"""
-    promptfield_id: str
-    value: str
-    
-    class Config:
-        schema_extra = {
-            "example": {
-                "promptfield_id": "1755923027740x713483466029849500",
-                "value": "subject is here"
-            }
-        }
-
-class GeneratedPromptBatchCreate(BaseModel):
-    """Model for batch creating GeneratedPrompt records"""
-    records: List[GeneratedPromptCreate]
-    
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "records": [
-                    {
-                        "promptfield_id": "1755923027740x713483466029849500",
-                        "value": "subject is here"
-                    },
-                    {
-                        "promptfield_id": "1755923028308x655772690012022000",
-                        "value": "composition is here"
-                    }
-                ]
-            }
-        }
-    }
-
 @app.get("/", tags=["basic"])
 async def root():
     return RedirectResponse(url="/docs")
@@ -208,13 +97,14 @@ def read_item(item_id: int, q: Optional[str] = None, api_key: str = Depends(get_
 @app.get("/bubble/sample-records/search", tags=["bubble"])
 async def search_bubble_sample_records_by_name(
     name: str, 
+    bubble_environment: str = "version-test",
     limit: Optional[int] = 10,
     api_key: str = Depends(get_api_key)
 ):
-    """Search for sample records in Bubble database by name field. Use query parameter: ?name=Sample Record"""
+    """Search for sample records in Bubble database by name field. Use query parameter: ?name=Sample Record&bubble_environment=version-test"""
     
     # Validate Bubble configuration
-    base_url = get_bubble_base_url()
+    base_url = get_bubble_base_url(bubble_environment)
     if not base_url or not BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -288,11 +178,15 @@ async def search_bubble_sample_records_by_name(
         )
 
 @app.get("/bubble/sample-records/{record_id}", tags=["bubble"])
-async def get_bubble_sample_record(record_id: str, api_key: str = Depends(get_api_key)):
+async def get_bubble_sample_record(
+    record_id: str, 
+    bubble_environment: str = "version-test",
+    api_key: str = Depends(get_api_key)
+):
     """Fetch a specific sample record from Bubble database by ID. Use example: 1755912306378x688197843685340200"""
     
     # Validate Bubble configuration
-    base_url = get_bubble_base_url()
+    base_url = get_bubble_base_url(bubble_environment)
     if not base_url or not BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -338,7 +232,7 @@ async def create_bubble_sample_record(record_data: BubbleRecordCreate, api_key: 
     """Create a new sample record in Bubble database"""
     
     # Validate Bubble configuration
-    base_url = get_bubble_base_url()
+    base_url = get_bubble_base_url(record_data.bubble_environment)
     if not base_url or not BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -402,7 +296,7 @@ async def create_bubble_sample_records_batch(batch_data: BubbleRecordBatchCreate
     """Create multiple sample records in Bubble database using bulk API"""
     
     # Validate Bubble configuration
-    base_url = get_bubble_base_url()
+    base_url = get_bubble_base_url(batch_data.bubble_environment)
     if not base_url or not BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -541,7 +435,7 @@ async def add_sample2_to_record_list(
     """Add a Sample2 record to the list_of_sample2 field of a Sample record. Use 1755917228572x874974032002943500 and 1755919121078x981069894958858800"""
     
     # Validate Bubble configuration
-    base_url = get_bubble_base_url()
+    base_url = get_bubble_base_url(update_data.bubble_environment)
     if not base_url or not BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -706,7 +600,7 @@ async def process_promptfield_attributes(
     
     for i, attr_value in enumerate(request_data.attributes):
         try:
-            record_id = await search_or_create_promptfield(attr_value.attribute)
+            record_id = await search_or_create_promptfield(attr_value.attribute, request_data.bubble_environment)
             results.append({
                 "attribute": attr_value.attribute,
                 "value": attr_value.value,
@@ -742,11 +636,11 @@ async def process_promptfield_attributes(
     
     return response
 
-async def search_or_create_promptfield(attribute_name: str) -> str:
+async def search_or_create_promptfield(attribute_name: str, environment: str = "version-test") -> str:
     """Search for PromptField by name, create if not found, return record ID"""
     
     # Validate Bubble configuration
-    base_url = get_bubble_promptfield_base_url()
+    base_url = get_bubble_promptfield_base_url(environment)
     if not base_url or not BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -816,7 +710,7 @@ async def create_generated_prompts_batch(
     """Create multiple GeneratedPrompt records in Bubble database using bulk API"""
     
     # Validate Bubble configuration
-    base_url = get_bubble_generatedprompt_base_url()
+    base_url = get_bubble_generatedprompt_base_url(batch_data.bubble_environment)
     if not base_url or not BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
