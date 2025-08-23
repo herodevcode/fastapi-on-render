@@ -4,12 +4,12 @@ import json
 import logging
 
 from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import APIKeyHeader
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List
 
 from config import settings
+from dependencies import get_api_key
 from models import (
     AttributeValue, 
     PromptFieldBatchRequest, 
@@ -27,9 +27,6 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
-
-# Define the API key header
-api_key_header = APIKeyHeader(name="X-API-Key")
 
 def get_bubble_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble API based on environment"""
@@ -70,14 +67,6 @@ def get_bubble_api_request_base_url(environment: str = "version-test"):
         return f"https://{settings.BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{settings.BUBBLE_API_REQUEST_DATA_TYPE}"
     else:
         return f"https://{settings.BUBBLE_APP_DOMAIN}/api/1.1/obj/{settings.BUBBLE_API_REQUEST_DATA_TYPE}"
-
-async def get_api_key(api_key: str = Depends(api_key_header)):
-    if api_key != settings.API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API key"
-        )
-    return api_key
 
 @app.get("/", tags=["basic"])
 async def root():
