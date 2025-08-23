@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import APIKeyHeader
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List
 
@@ -88,7 +89,7 @@ class BubbleRecordBatchCreate(BaseModel):
 
 @app.get("/", tags=["basic"])
 async def root():
-    return {"message": "Hello World"}
+    return RedirectResponse(url="/docs")
 
 @app.get("/items/{item_id}", tags=["basic"])
 def read_item(item_id: int, q: Optional[str] = None, api_key: str = Depends(get_api_key)):
