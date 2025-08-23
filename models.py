@@ -168,3 +168,41 @@ class PromptFieldAndGeneratedPromptBatchCreate(BaseModel):
             }
         }
     }
+
+class ApiRequestUpdate(BaseModel):
+    """Model for updating an API request record. Use: 1755878226412x138224706807443800"""
+    json_prompt: List[AttributeValue]
+    generated_prompts: List[str]
+    bubble_environment: Literal["production", "version-test"] = "version-test"
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "json_prompt": [
+                    {
+                        "attribute": "subject",
+                        "value": "A complete description of the primary and secondary subjects, including their appearance, attire, and actions."
+                    },
+                    {
+                        "attribute": "composition",
+                        "value": "A description of the shot type, camera angle, and framing, including layout details like foreground/background and use of compositional rules."
+                    },
+                    {
+                        "attribute": "environment",
+                        "value": "A description of the location, time of day, weather, and overall atmosphere."
+                    },
+                    {
+                        "attribute": "style",
+                        "value": "A description of the medium (e.g., photo, painting), artistic look, lighting, color palette, and any technical details like depth of field or film grain."
+                    }
+                ],
+                "generated_prompts": [
+                    "1755929474459x247733095409041760",
+                    "1755929474457x665050477953099000",
+                    "1755929474456x950032919292906900",
+                    "1755929474454x672506176960183700"
+                ],
+                "bubble_environment": "version-test"
+            }
+        }
+    }

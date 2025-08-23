@@ -20,7 +20,8 @@ from models import (
     BubbleRecordUpdateListField, 
     GeneratedPromptCreate, 
     GeneratedPromptBatchCreate,
-    PromptFieldAndGeneratedPromptBatchCreate
+    PromptFieldAndGeneratedPromptBatchCreate,
+    ApiRequestUpdate
 )
 
 # Configure logging
@@ -47,6 +48,7 @@ BUBBLE_SAMPLE_DATA_TYPE = os.getenv("BUBBLE_SAMPLE_DATA_TYPE")
 BUBBLE_SAMPLE2_DATA_TYPE = os.getenv("BUBBLE_SAMPLE2_DATA_TYPE")
 BUBBLE_PROMPTFIELD_DATA_TYPE = os.getenv("BUBBLE_PROMPTFIELD_DATA_TYPE")
 BUBBLE_GENERATEDPROMPT_DATA_TYPE = os.getenv("BUBBLE_GENERATEDPROMPT_DATA_TYPE")
+BUBBLE_API_REQUEST_DATA_TYPE = os.getenv("BUBBLE_API_REQUEST_DATA_TYPE")
 BUBBLE_ENVIRONMENT = os.getenv("BUBBLE_ENVIRONMENT", "production")
 
 def get_bubble_base_url(environment: str = "version-test"):
@@ -78,6 +80,16 @@ def get_bubble_generatedprompt_base_url(environment: str = "version-test"):
         return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_GENERATEDPROMPT_DATA_TYPE}"
     else:
         return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_GENERATEDPROMPT_DATA_TYPE}"
+
+def get_bubble_api_request_base_url(environment: str = "version-test"):
+    """Get the base URL for Bubble API Request based on environment"""
+    if not BUBBLE_APP_DOMAIN or not BUBBLE_API_REQUEST_DATA_TYPE:
+        return None
+    
+    if environment == "version-test":
+        return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_API_REQUEST_DATA_TYPE}"
+    else:
+        return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_API_REQUEST_DATA_TYPE}"
 
 async def get_api_key(api_key: str = Depends(api_key_header)):
     if api_key != API_KEY:
@@ -1006,4 +1018,115 @@ async def create_promptfields_and_generated_prompts_batch(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error during GeneratedPrompt creation: {str(e)}"
+        )
+
+@app.patch("/bubble/api-requests/{request_id}", tags=["bubble"])
+async def update_api_request(
+    request_id: str,
+    update_data: ApiRequestUpdate,
+    api_key: str = Depends(get_api_key)
+):
+    """Update an API Request record with JSON prompt and generated prompts"""
+    
+    # Validate Bubble configuration
+    base_url = get_bubble_api_request_base_url(update_data.bubble_environment)
+    if not base_url or not BUBBLE_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bubble API Request configuration is missing. Please check environment variables."
+        )
+    
+    # Format JSON prompt field for Bubble
+    json_prompt_formatted = []
+    for item in update_data.json_prompt:
+        json_prompt_formatted.append({
+            "attribute": item.attribute,
+            "value": item.value
+        })
+    
+    # Prepare update payload - convert JSON prompt to string as expected by Bubble
+    payload = {
+        "jsonPrompt": json.dumps(json_prompt_formatted),
+        "GeneratedPrompts": update_data.generated_prompts
+    }
+    
+    # URL for the specific record
+    url = f"{base_url}/{request_id}"
+    headers = {
+        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    logger.info(f"Updating API Request record {request_id} with payload: {payload}")
+    
+    try:
+        # Make PATCH request to Bubble API
+        response = requests.patch(url, headers=headers, json=payload, timeout=30)
+        
+        logger.info(f"Response status: {response.status_code}")
+        logger.info(f"Response content: {response.text}")
+        
+        if response.status_code in [200, 204]:
+            # Handle both 200 (OK with content) and 204 (No Content - successful update)
+            if response.status_code == 204:
+                response_data = {
+                    "status": "success",
+                    "message": "API Request record updated successfully"
+                }
+            else:
+                response_data = response.json()
+            
+            return {
+                "success": True,
+                "message": f"Successfully updated API Request record {request_id}",
+                "request_id": request_id,
+                "json_prompt_count": len(update_data.json_prompt),
+                "GeneratedPrompts_count": len(update_data.generated_prompts),
+                "http_status": response.status_code,
+                "data": response_data
+            }
+        elif response.status_code == 400:
+            logger.error(f"400 Bad Request details: {response.text}")
+            try:
+                error_data = response.json()
+                error_message = error_data.get("body", {}).get("message", response.text)
+            except:
+                error_message = response.text
+            
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid data provided: {error_message}"
+            )
+        elif response.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Bubble API token"
+            )
+        elif response.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. Check Bubble privacy rules and API settings."
+            )
+        elif response.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"API Request record with ID {request_id} not found"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Bubble API error: {response.status_code} - {response.text}"
+            )
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request exception: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
         )
