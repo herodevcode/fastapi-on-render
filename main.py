@@ -19,7 +19,8 @@ from models import (
     BubbleRecordBatchCreate, 
     BubbleRecordUpdateListField, 
     GeneratedPromptCreate, 
-    GeneratedPromptBatchCreate
+    GeneratedPromptBatchCreate,
+    PromptFieldAndGeneratedPromptBatchCreate
 )
 
 # Configure logging
@@ -793,8 +794,8 @@ async def create_generated_prompts_batch(
                 logger.error(f"Raw response: {response.text}")
                 return {
                     "success": False,
-                    "message": f"GeneratedPrompt batch request completed but response parsing failed",
-                    "requested_count": len(batch_data.records),
+                    "message": "GeneratedPrompt batch request completed but response parsing failed",
+                    "generated_prompt_ids": [],
                     "raw_response": response.text,
                     "error": str(json_err)
                 }
@@ -838,4 +839,171 @@ async def create_generated_prompts_batch(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error: {str(e)}"
+        )
+
+@app.post("/bubble/promptfields-and-generated-prompts/batch", tags=["bubble"])
+async def create_promptfields_and_generated_prompts_batch(
+    request_data: PromptFieldAndGeneratedPromptBatchCreate,
+    api_key: str = Depends(get_api_key)
+):
+    """Process attributes to create/find PromptFields and create corresponding GeneratedPrompts, returning GeneratedPrompt IDs"""
+    
+    if not BUBBLE_PROMPTFIELD_DATA_TYPE or not BUBBLE_GENERATEDPROMPT_DATA_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="BUBBLE_PROMPTFIELD_DATA_TYPE or BUBBLE_GENERATEDPROMPT_DATA_TYPE is not configured. Please check environment variables."
+        )
+    
+    generated_prompt_records = []
+    results = []
+    errors = []
+    
+    logger.info(f"Processing {len(request_data.attributes)} attributes for PromptField and GeneratedPrompt creation")
+    
+    # Step 1: Process each attribute to get/create PromptField and prepare GeneratedPrompt data
+    for i, attr_value in enumerate(request_data.attributes):
+        try:
+            # Get or create PromptField
+            promptfield_id = await search_or_create_promptfield(attr_value.attribute, request_data.bubble_environment)
+            
+            # Prepare GeneratedPrompt record
+            generated_prompt_records.append(GeneratedPromptCreate(
+                promptfield_id=promptfield_id,
+                value=attr_value.value
+            ))
+            
+            results.append({
+                "attribute": attr_value.attribute,
+                "value": attr_value.value,
+                "promptfield_id": promptfield_id,
+                "index": i
+            })
+            
+        except Exception as e:
+            error_detail = {
+                "attribute": attr_value.attribute,
+                "value": attr_value.value,
+                "index": i,
+                "error": str(e)
+            }
+            errors.append(error_detail)
+            logger.error(f"Error processing attribute '{attr_value.attribute}': {str(e)}")
+    
+    # If we have errors in PromptField processing, return early
+    if errors:
+        return {
+            "success": False,
+            "message": f"Failed to process {len(errors)} out of {len(request_data.attributes)} attributes",
+            "total_processed": len(request_data.attributes),
+            "successful_promptfield_count": len(results),
+            "error_count": len(errors),
+            "errors": errors,
+            "generated_prompt_ids": []
+        }
+    
+    # Step 2: Batch create GeneratedPrompts
+    try:
+        batch_create_data = GeneratedPromptBatchCreate(
+            records=generated_prompt_records,
+            bubble_environment=request_data.bubble_environment
+        )
+        
+        # Use the existing batch create logic
+        base_url = get_bubble_generatedprompt_base_url(request_data.bubble_environment)
+        if not base_url or not BUBBLE_API_TOKEN:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Bubble GeneratedPrompt API configuration is missing. Please check environment variables."
+            )
+        
+        # Format data as newline-separated JSON objects
+        bulk_data_lines = []
+        for record in generated_prompt_records:
+            record_json = {
+                "PromptField": record.promptfield_id,
+                "Value": record.value
+            }
+            bulk_data_lines.append(json.dumps(record_json))
+        
+        bulk_data = "\n".join(bulk_data_lines)
+        
+        # Prepare request to bulk endpoint
+        url = f"{base_url}/bulk"
+        headers = {
+            "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+            "Content-Type": "text/plain"
+        }
+        
+        logger.info(f"Creating {len(generated_prompt_records)} GeneratedPrompt records")
+        
+        # Make request to Bubble API
+        response = requests.post(url, headers=headers, data=bulk_data, timeout=30)
+        
+        if response.status_code == 200:
+            try:
+                # Parse multi-line JSON response
+                response_lines = response.text.strip().split('\n')
+                parsed_responses = []
+                
+                for line in response_lines:
+                    if line.strip():
+                        parsed_responses.append(json.loads(line))
+                
+                # Extract created GeneratedPrompt IDs
+                generated_prompt_ids = []
+                successful_count = 0
+                creation_errors = []
+                
+                for i, resp in enumerate(parsed_responses):
+                    if resp.get("status") == "success":
+                        successful_count += 1
+                        if "id" in resp:
+                            generated_prompt_ids.append(resp["id"])
+                            # Add the generated_prompt_id to our results
+                            if i < len(results):
+                                results[i]["generated_prompt_id"] = resp["id"]
+                    else:
+                        creation_errors.append({
+                            "index": i,
+                            "error": resp,
+                            "attribute": results[i]["attribute"] if i < len(results) else "unknown"
+                        })
+                
+                return {
+                    "success": successful_count == len(generated_prompt_records),
+                    "message": f"Successfully created {successful_count} out of {len(generated_prompt_records)} GeneratedPrompt records",
+                    "total_attributes": len(request_data.attributes),
+                    "promptfield_processing_successful": len(results),
+                    "generated_prompt_creation_successful": successful_count,
+                    "generated_prompt_ids": generated_prompt_ids,
+                    "detailed_results": results,
+                    "creation_errors": creation_errors if creation_errors else None
+                }
+                
+            except json.JSONDecodeError as json_err:
+                logger.error(f"JSON decode error: {json_err}")
+                return {
+                    "success": False,
+                    "message": "GeneratedPrompt batch creation completed but response parsing failed",
+                    "generated_prompt_ids": [],
+                    "raw_response": response.text,
+                    "error": str(json_err)
+                }
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to create GeneratedPrompts: {response.status_code} - {response.text}"
+            )
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request exception during GeneratedPrompt creation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API for GeneratedPrompt creation: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during GeneratedPrompt creation: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error during GeneratedPrompt creation: {str(e)}"
         )
