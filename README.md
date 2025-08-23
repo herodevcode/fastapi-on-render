@@ -11,3 +11,9 @@ pip install -r requirements.txt
 source .venv/bin/activate
 
 uvicorn main:app --host 0.0.0.0
+
+# sample datatypes
+
+![alt text](sample_assets/image.png)
+
+![alt text](sample_assets/image-1.png)

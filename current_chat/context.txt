@@ -1,14 +1,65 @@
-Based on the Bubble API documentation, you can add a search endpoint that finds records by matching the "name" field value. Here's how to implement it:
+Based on the Bubble API documentation, I'll help you add an endpoint to update records by adding connections to a list field. Here's how to implement this:
 
-// ...existing code...
+1. First, let's update the environment configuration
 
-@app.get("/bubble/sample-records/search", tags=["bubble"])
-async def search_bubble_sample_records_by_name(
-    name: str, 
-    limit: Optional[int] = 10,
+# ...existing code...
+BUBBLE_APP_DOMAIN = os.getenv("BUBBLE_APP_DOMAIN")
+BUBBLE_API_TOKEN = os.getenv("BUBBLE_API_TOKEN")
+BUBBLE_SAMPLE_DATA_TYPE = os.getenv("BUBBLE_SAMPLE_DATA_TYPE")
+BUBBLE_SAMPLE2_DATA_TYPE = os.getenv("BUBBLE_SAMPLE2_DATA_TYPE")  # Add this line
+BUBBLE_ENVIRONMENT = os.getenv("BUBBLE_ENVIRONMENT", "production")
+# ...existing code...
+
+2. Add a new Pydantic model for the update request
+
+# ...existing code...
+class BubbleRecordBatchCreate(BaseModel):
+    """Model for batch creating records in Bubble database"""
+    records: List[BubbleRecordCreate]
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "records": [
+                    {
+                        "name": "string",
+                        "description": "string"
+                    },
+                    {
+                        "name": "string",
+                        "description": "string"
+                    }
+                ]
+            }
+        }
+    }
+
+class BubbleRecordUpdateListField(BaseModel):
+    """Model for updating a list field in a Bubble record"""
+    sample2_id: str
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "sample2_id": "1755912306378x688197843685340200"
+            }
+        }
+# ...existing code...
+
+3. Add the new endpoint for updating records
+
+# ...existing code...
+@app.post("/bubble/sample-records/batch", tags=["bubble"])
+async def create_bubble_sample_records_batch(batch_data: BubbleRecordBatchCreate, api_key: str = Depends(get_api_key)):
+    # ...existing code...
+
+@app.patch("/bubble/sample-records/{record_id}/add-sample2", tags=["bubble"])
+async def add_sample2_to_record_list(
+    record_id: str, 
+    update_data: BubbleRecordUpdateListField, 
     api_key: str = Depends(get_api_key)
 ):
-    """Search for sample records in Bubble database by name field. Use query parameter: ?name=Sample Record"""
+    """Add a Sample2 record to the list_of_sample2 field of a Sample record"""
     
     # Validate Bubble configuration
     base_url = get_bubble_base_url()
@@ -18,49 +69,48 @@ async def search_bubble_sample_records_by_name(
             detail="Bubble API configuration is missing. Please check environment variables."
         )
     
-    # Prepare request with search constraints
-    url = base_url
+    if not BUBBLE_SAMPLE2_DATA_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="BUBBLE_SAMPLE2_DATA_TYPE is not configured. Please check environment variables."
+        )
+    
+    # Prepare the update payload
+    # In Bubble, to add to a list field, you use the ":add" operator
+    payload = {
+        "list_of_sample2:add": [update_data.sample2_id]
+    }
+    
+    # Prepare request
+    url = f"{base_url}/{record_id}"
     headers = {
         "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
         "Content-Type": "application/json"
     }
     
-    # Build search parameters for Bubble Data API
-    params = {
-        "constraints": json.dumps([{
-            "key": "name",
-            "constraint_type": "equals",
-            "value": name
-        }]),
-        "limit": limit
-    }
+    logger.info(f"Updating record {record_id} with payload: {payload}")
+    logger.info(f"Request URL: {url}")
     
     try:
-        # Make request to Bubble API
-        response = requests.get(url, headers=headers, params=params, timeout=30)
+        # Make PATCH request to Bubble API
+        response = requests.patch(url, headers=headers, json=payload, timeout=30)
         
-        logger.info(f"Search request URL: {response.url}")
         logger.info(f"Response status: {response.status_code}")
+        logger.info(f"Response content: {response.text}")
         
         if response.status_code == 200:
             response_data = response.json()
-            results = response_data.get("response", {}).get("results", [])
-            
             return {
                 "success": True,
-                "search_query": {
-                    "field": "name",
-                    "value": name,
-                    "limit": limit
-                },
-                "count": len(results),
-                "remaining": response_data.get("response", {}).get("remaining", 0),
-                "results": results
+                "message": f"Successfully added Sample2 record {update_data.sample2_id} to Sample record {record_id}",
+                "record_id": record_id,
+                "added_sample2_id": update_data.sample2_id,
+                "data": response_data
             }
         elif response.status_code == 400:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid search parameters: {response.text}"
+                detail=f"Invalid data provided or record not found: {response.text}"
             )
         elif response.status_code == 401:
             raise HTTPException(
@@ -72,6 +122,11 @@ async def search_bubble_sample_records_by_name(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Permission denied. Check Bubble privacy rules and API settings."
             )
+        elif response.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Sample record with ID {record_id} not found"
+            )
         else:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
@@ -79,26 +134,40 @@ async def search_bubble_sample_records_by_name(
             )
             
     except requests.exceptions.RequestException as e:
+        logger.error(f"Request exception: {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Failed to connect to Bubble API: {str(e)}"
         )
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
+        )
 
-// ...existing code...
+4. Update your .env file
 
-This endpoint:
+BUBBLE_SAMPLE2_DATA_TYPE=your_sample2_data_type_name
 
-Accepts a search query: Uses the name parameter to search for records where the name field matches the provided value
-Uses Bubble's constraint system: Constructs a JSON constraint that tells Bubble to find records where name equals the search value
-Supports pagination: Includes a limit parameter (default 10) to control how many results to return
-Returns structured results: Provides the search query details, result count, and the actual matching records
-Usage examples:
+Add the new environment variable:
 
-Search for records with name "Sample Record": GET /bubble/sample-records/search?name=Sample Record
-Limit results to 5: GET /bubble/sample-records/search?name=Test&limit=5
-The endpoint uses Bubble's Data API constraint system where you can specify:
+Key Points:
+List Field Updates: In Bubble's Data API, to add items to a list field, you use the :add operator with the field name (e.g., "list_of_sample2:add": [item_id])
 
-key: The field name to search ("name")
-constraint_type: The comparison type ("equals", "contains", "greater than", etc.)
-value: The value to match against
-You can extend this pattern to search by other fields or add more complex search functionality with multiple constraints.
+HTTP Method: We use PATCH for partial updates, which is the standard RESTful approach for modifying specific fields
+
+Validation: The endpoint validates that both the main data type and the sample2 data type are configured
+
+Error Handling: Comprehensive error handling for various HTTP status codes that Bubble might return
+
+Logging: Added detailed logging to help debug any issues
+
+Usage Example:
+PATCH /bubble/sample-records/1755912306378x688197843685340200/add-sample2
+{
+  "sample2_id": "1755912306378x688197843685340201"
+}
+This will add the Sample2 record with the specified ID to the list_of_sample2 field of the Sample record.
+
+You can also create similar endpoints for removing items from the list using the :remove operator, or for other list operations as needed.
