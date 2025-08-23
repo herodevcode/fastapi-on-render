@@ -1275,7 +1275,8 @@ async def process_and_update_api_request(
         # Prepare update payload
         update_payload = {
             "jsonPrompt": json.dumps(json_prompt_formatted),
-            "GeneratedPrompts": api_update_data.generated_prompts
+            "GeneratedPrompts": api_update_data.generated_prompts,
+            "Request Status": "Completed"
         }
         
         # URL for the specific API Request record
