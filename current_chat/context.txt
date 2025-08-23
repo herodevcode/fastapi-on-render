@@ -1,40 +1,173 @@
-Based on the documentation, to create an endpoint in your Bubble app for creating or updating records, you should start with Bubble's Data API.
+Based on the Bubble API documentation, I'll help you add an endpoint to update records by adding connections to a list field. Here's how to implement this:
 
-Here is a basic guide to get you started:
+1. First, let's update the environment configuration
 
-1. Enable the Data API in Bubble
-First, you need to enable the Data API and expose the specific data types you want to work with.
+# ...existing code...
+BUBBLE_APP_DOMAIN = os.getenv("BUBBLE_APP_DOMAIN")
+BUBBLE_API_TOKEN = os.getenv("BUBBLE_API_TOKEN")
+BUBBLE_SAMPLE_DATA_TYPE = os.getenv("BUBBLE_SAMPLE_DATA_TYPE")
+BUBBLE_SAMPLE2_DATA_TYPE = os.getenv("BUBBLE_SAMPLE2_DATA_TYPE")  # Add this line
+BUBBLE_ENVIRONMENT = os.getenv("BUBBLE_ENVIRONMENT", "production")
+# ...existing code...
 
-In your Bubble editor, navigate to Settings > API.
-Check the box for Enable Data API.
-Once enabled, a list of your app's data types will appear. Check the box next to the data type you want to create or update records for (e.g., User, Product).
-2. Get Your API Token for Authentication
-To test the connection, the simplest method is to use a private API key which grants admin-level access.
+2. Add a new Pydantic model for the update request
 
-In the same Settings > API tab, scroll down to the API Keys section.
-Generate a new Private key. Give it a descriptive name.
-Copy this key. You will use it as a "Bearer token" to authenticate your requests.
-Important: Keep this key secret, as it provides full access to your app's data.
+# ...existing code...
+class BubbleRecordBatchCreate(BaseModel):
+    """Model for batch creating records in Bubble database"""
+    records: List[BubbleRecordCreate]
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "records": [
+                    {
+                        "name": "string",
+                        "description": "string"
+                    },
+                    {
+                        "name": "string",
+                        "description": "string"
+                    }
+                ]
+            }
+        }
+    }
 
-3. Test the Connection
-You can now send a request from an API tool like Postman or using curl to test the connection. The goal is to create a new record.
+class BubbleRecordUpdateListField(BaseModel):
+    """Model for updating a list field in a Bubble record"""
+    sample2_id: str
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "sample2_id": "1755912306378x688197843685340200"
+            }
+        }
+# ...existing code...
 
-The endpoint URL to create a new object of a certain type is: POST https://<your-app-domain>/api/1.1/obj/<type-name>
+3. Add the new endpoint for updating records
 
-Replace <your-app-domain> with your app's domain (e.g., yourapp.bubbleapps.io) and <type-name> with the name of the data type you exposed.
+# ...existing code...
+@app.post("/bubble/sample-records/batch", tags=["bubble"])
+async def create_bubble_sample_records_batch(batch_data: BubbleRecordBatchCreate, api_key: str = Depends(get_api_key)):
+    # ...existing code...
 
-Here is an example using curl to create a new record in a type called item with a field named name:
+@app.patch("/bubble/sample-records/{record_id}/add-sample2", tags=["bubble"])
+async def add_sample2_to_record_list(
+    record_id: str, 
+    update_data: BubbleRecordUpdateListField, 
+    api_key: str = Depends(get_api_key)
+):
+    """Add a Sample2 record to the list_of_sample2 field of a Sample record"""
+    
+    # Validate Bubble configuration
+    base_url = get_bubble_base_url()
+    if not base_url or not BUBBLE_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bubble API configuration is missing. Please check environment variables."
+        )
+    
+    if not BUBBLE_SAMPLE2_DATA_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="BUBBLE_SAMPLE2_DATA_TYPE is not configured. Please check environment variables."
+        )
+    
+    # Prepare the update payload
+    # In Bubble, to add to a list field, you use the ":add" operator
+    payload = {
+        "list_of_sample2:add": [update_data.sample2_id]
+    }
+    
+    # Prepare request
+    url = f"{base_url}/{record_id}"
+    headers = {
+        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    logger.info(f"Updating record {record_id} with payload: {payload}")
+    logger.info(f"Request URL: {url}")
+    
+    try:
+        # Make PATCH request to Bubble API
+        response = requests.patch(url, headers=headers, json=payload, timeout=30)
+        
+        logger.info(f"Response status: {response.status_code}")
+        logger.info(f"Response content: {response.text}")
+        
+        if response.status_code == 200:
+            response_data = response.json()
+            return {
+                "success": True,
+                "message": f"Successfully added Sample2 record {update_data.sample2_id} to Sample record {record_id}",
+                "record_id": record_id,
+                "added_sample2_id": update_data.sample2_id,
+                "data": response_data
+            }
+        elif response.status_code == 400:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid data provided or record not found: {response.text}"
+            )
+        elif response.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Bubble API token"
+            )
+        elif response.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. Check Bubble privacy rules and API settings."
+            )
+        elif response.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Sample record with ID {record_id} not found"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Bubble API error: {response.status_code} - {response.text}"
+            )
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request exception: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
+        )
 
-curl -X POST "https://<your-app-domain>/api/1.1/obj/item" \
--H "Authorization: Bearer <your-api-token>" \
--H "Content-Type: application/json" \
--d '{
-  "name": "My Test Item"
-}'
+4. Update your .env file
 
-If successful, the API will respond with a 201 Created status and the unique ID of the new record.
+BUBBLE_SAMPLE2_DATA_TYPE=your_sample2_data_type_name
 
-Next Steps: Updating a Record
-To update a record, you will make a PATCH or PUT request to the same endpoint, but you'll append the unique ID of the record you want to change.
+Add the new environment variable:
 
-PATCH https://<your-app-domain>/api/1.1/obj/<type-name>/<record-id>
+Key Points:
+List Field Updates: In Bubble's Data API, to add items to a list field, you use the :add operator with the field name (e.g., "list_of_sample2:add": [item_id])
+
+HTTP Method: We use PATCH for partial updates, which is the standard RESTful approach for modifying specific fields
+
+Validation: The endpoint validates that both the main data type and the sample2 data type are configured
+
+Error Handling: Comprehensive error handling for various HTTP status codes that Bubble might return
+
+Logging: Added detailed logging to help debug any issues
+
+Usage Example:
+PATCH /bubble/sample-records/1755912306378x688197843685340200/add-sample2
+{
+  "sample2_id": "1755912306378x688197843685340201"
+}
+This will add the Sample2 record with the specified ID to the list_of_sample2 field of the Sample record.
+
+You can also create similar endpoints for removing items from the list using the :remove operator, or for other list operations as needed.
