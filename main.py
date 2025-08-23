@@ -95,6 +95,88 @@ async def root():
 def read_item(item_id: int, q: Optional[str] = None, api_key: str = Depends(get_api_key)):
     return {"item_id": item_id, "q": q}
 
+@app.get("/bubble/sample-records/search", tags=["bubble"])
+async def search_bubble_sample_records_by_name(
+    name: str, 
+    limit: Optional[int] = 10,
+    api_key: str = Depends(get_api_key)
+):
+    """Search for sample records in Bubble database by name field. Use query parameter: ?name=Sample Record"""
+    
+    # Validate Bubble configuration
+    base_url = get_bubble_base_url()
+    if not base_url or not BUBBLE_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bubble API configuration is missing. Please check environment variables."
+        )
+    
+    # Prepare request with search constraints
+    url = base_url
+    headers = {
+        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # Build search parameters for Bubble Data API
+    params = {
+        "constraints": json.dumps([{
+            "key": "name",
+            "constraint_type": "equals",
+            "value": name
+        }]),
+        "limit": limit
+    }
+    
+    try:
+        # Make request to Bubble API
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        
+        logger.info(f"Search request URL: {response.url}")
+        logger.info(f"Response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            response_data = response.json()
+            results = response_data.get("response", {}).get("results", [])
+            
+            return {
+                "success": True,
+                "search_query": {
+                    "field": "name",
+                    "value": name,
+                    "limit": limit
+                },
+                "count": len(results),
+                "remaining": response_data.get("response", {}).get("remaining", 0),
+                "results": results
+            }
+        elif response.status_code == 400:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid search parameters: {response.text}"
+            )
+        elif response.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Bubble API token"
+            )
+        elif response.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. Check Bubble privacy rules and API settings."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Bubble API error: {response.status_code} - {response.text}"
+            )
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
+        )
+
 @app.get("/bubble/sample-records/{record_id}", tags=["bubble"])
 async def get_bubble_sample_record(record_id: str, api_key: str = Depends(get_api_key)):
     """Fetch a specific sample record from Bubble database by ID. Use example: 1755912306378x688197843685340200"""

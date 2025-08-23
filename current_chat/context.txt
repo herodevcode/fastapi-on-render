@@ -1,40 +1,104 @@
-Based on the documentation, to create an endpoint in your Bubble app for creating or updating records, you should start with Bubble's Data API.
+Based on the Bubble API documentation, you can add a search endpoint that finds records by matching the "name" field value. Here's how to implement it:
 
-Here is a basic guide to get you started:
+// ...existing code...
 
-1. Enable the Data API in Bubble
-First, you need to enable the Data API and expose the specific data types you want to work with.
+@app.get("/bubble/sample-records/search", tags=["bubble"])
+async def search_bubble_sample_records_by_name(
+    name: str, 
+    limit: Optional[int] = 10,
+    api_key: str = Depends(get_api_key)
+):
+    """Search for sample records in Bubble database by name field. Use query parameter: ?name=Sample Record"""
+    
+    # Validate Bubble configuration
+    base_url = get_bubble_base_url()
+    if not base_url or not BUBBLE_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bubble API configuration is missing. Please check environment variables."
+        )
+    
+    # Prepare request with search constraints
+    url = base_url
+    headers = {
+        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # Build search parameters for Bubble Data API
+    params = {
+        "constraints": json.dumps([{
+            "key": "name",
+            "constraint_type": "equals",
+            "value": name
+        }]),
+        "limit": limit
+    }
+    
+    try:
+        # Make request to Bubble API
+        response = requests.get(url, headers=headers, params=params, timeout=30)
+        
+        logger.info(f"Search request URL: {response.url}")
+        logger.info(f"Response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            response_data = response.json()
+            results = response_data.get("response", {}).get("results", [])
+            
+            return {
+                "success": True,
+                "search_query": {
+                    "field": "name",
+                    "value": name,
+                    "limit": limit
+                },
+                "count": len(results),
+                "remaining": response_data.get("response", {}).get("remaining", 0),
+                "results": results
+            }
+        elif response.status_code == 400:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid search parameters: {response.text}"
+            )
+        elif response.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Bubble API token"
+            )
+        elif response.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. Check Bubble privacy rules and API settings."
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Bubble API error: {response.status_code} - {response.text}"
+            )
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
+        )
 
-In your Bubble editor, navigate to Settings > API.
-Check the box for Enable Data API.
-Once enabled, a list of your app's data types will appear. Check the box next to the data type you want to create or update records for (e.g., User, Product).
-2. Get Your API Token for Authentication
-To test the connection, the simplest method is to use a private API key which grants admin-level access.
+// ...existing code...
 
-In the same Settings > API tab, scroll down to the API Keys section.
-Generate a new Private key. Give it a descriptive name.
-Copy this key. You will use it as a "Bearer token" to authenticate your requests.
-Important: Keep this key secret, as it provides full access to your app's data.
+This endpoint:
 
-3. Test the Connection
-You can now send a request from an API tool like Postman or using curl to test the connection. The goal is to create a new record.
+Accepts a search query: Uses the name parameter to search for records where the name field matches the provided value
+Uses Bubble's constraint system: Constructs a JSON constraint that tells Bubble to find records where name equals the search value
+Supports pagination: Includes a limit parameter (default 10) to control how many results to return
+Returns structured results: Provides the search query details, result count, and the actual matching records
+Usage examples:
 
-The endpoint URL to create a new object of a certain type is: POST https://<your-app-domain>/api/1.1/obj/<type-name>
+Search for records with name "Sample Record": GET /bubble/sample-records/search?name=Sample Record
+Limit results to 5: GET /bubble/sample-records/search?name=Test&limit=5
+The endpoint uses Bubble's Data API constraint system where you can specify:
 
-Replace <your-app-domain> with your app's domain (e.g., yourapp.bubbleapps.io) and <type-name> with the name of the data type you exposed.
-
-Here is an example using curl to create a new record in a type called item with a field named name:
-
-curl -X POST "https://<your-app-domain>/api/1.1/obj/item" \
--H "Authorization: Bearer <your-api-token>" \
--H "Content-Type: application/json" \
--d '{
-  "name": "My Test Item"
-}'
-
-If successful, the API will respond with a 201 Created status and the unique ID of the new record.
-
-Next Steps: Updating a Record
-To update a record, you will make a PATCH or PUT request to the same endpoint, but you'll append the unique ID of the record you want to change.
-
-PATCH https://<your-app-domain>/api/1.1/obj/<type-name>/<record-id>
+key: The field name to search ("name")
+constraint_type: The comparison type ("equals", "contains", "greater than", etc.)
+value: The value to match against
+You can extend this pattern to search by other fields or add more complex search functionality with multiple constraints.
