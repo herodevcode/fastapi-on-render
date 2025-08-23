@@ -34,6 +34,7 @@ BUBBLE_APP_DOMAIN = os.getenv("BUBBLE_APP_DOMAIN")
 BUBBLE_API_TOKEN = os.getenv("BUBBLE_API_TOKEN")
 BUBBLE_SAMPLE_DATA_TYPE = os.getenv("BUBBLE_SAMPLE_DATA_TYPE")
 BUBBLE_SAMPLE2_DATA_TYPE = os.getenv("BUBBLE_SAMPLE2_DATA_TYPE")
+BUBBLE_PROMPTFIELD_DATA_TYPE = os.getenv("BUBBLE_PROMPTFIELD_DATA_TYPE")
 BUBBLE_ENVIRONMENT = os.getenv("BUBBLE_ENVIRONMENT", "production")
 
 def get_bubble_base_url():
@@ -45,6 +46,16 @@ def get_bubble_base_url():
         return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_SAMPLE_DATA_TYPE}"
     else:
         return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_SAMPLE_DATA_TYPE}"
+
+def get_bubble_promptfield_base_url():
+    """Get the base URL for Bubble PromptField API based on environment"""
+    if not BUBBLE_APP_DOMAIN or not BUBBLE_PROMPTFIELD_DATA_TYPE:
+        return None
+    
+    if BUBBLE_ENVIRONMENT == "version-test":
+        return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_PROMPTFIELD_DATA_TYPE}"
+    else:
+        return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_PROMPTFIELD_DATA_TYPE}"
 
 async def get_api_key(api_key: str = Depends(api_key_header)):
     if api_key != API_KEY:
@@ -98,6 +109,48 @@ class BubbleRecordUpdateListField(BaseModel):
                 "sample2_id": "1755912306378x688197843685340200"
             }
         }
+
+class AttributeValue(BaseModel):
+    """Model for attribute-value pair"""
+    attribute: str
+    value: str
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "attribute": "subject",
+                "value": "A complete description of the primary and secondary subjects, including their appearance, attire, and actions."
+            }
+        }
+
+class PromptFieldBatchRequest(BaseModel):
+    """Model for batch processing PromptField attributes"""
+    attributes: List[AttributeValue]
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "attributes": [
+                    {
+                        "attribute": "subject",
+                        "value": "A complete description of the primary and secondary subjects, including their appearance, attire, and actions."
+                    },
+                    {
+                        "attribute": "composition",
+                        "value": "A description of the shot type, camera angle, and framing, including layout details like foreground/background and use of compositional rules."
+                    },
+                    {
+                        "attribute": "environment",
+                        "value": "A description of the location, time of day, weather, and overall atmosphere."
+                    },
+                    {
+                        "attribute": "style",
+                        "value": "A description of the medium (e.g., photo, painting), artistic look, lighting, color palette, and any technical details like depth of field or film grain."
+                    }
+                ]
+            }
+        }
+    }
 
 @app.get("/", tags=["basic"])
 async def root():
@@ -586,4 +639,126 @@ async def add_sample2_to_record_list(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error: {str(e)}"
+        )
+
+@app.post("/bubble/promptfields/batch-process", tags=["bubble"])
+async def process_promptfield_attributes(
+    request_data: PromptFieldBatchRequest,
+    api_key: str = Depends(get_api_key)
+):
+    """Process a list of attribute-value pairs and return PromptField record IDs"""
+    
+    if not BUBBLE_PROMPTFIELD_DATA_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="BUBBLE_PROMPTFIELD_DATA_TYPE is not configured. Please check environment variables."
+        )
+    
+    results = []
+    errors = []
+    
+    logger.info(f"Processing {len(request_data.attributes)} PromptField attributes")
+    
+    for i, attr_value in enumerate(request_data.attributes):
+        try:
+            record_id = await search_or_create_promptfield(attr_value.attribute)
+            results.append({
+                "attribute": attr_value.attribute,
+                "value": attr_value.value,
+                "promptfield_id": record_id,
+                "index": i
+            })
+            
+        except Exception as e:
+            error_detail = {
+                "attribute": attr_value.attribute,
+                "value": attr_value.value,
+                "index": i,
+                "error": str(e)
+            }
+            errors.append(error_detail)
+            logger.error(f"Error processing attribute '{attr_value.attribute}': {str(e)}")
+    
+    # Extract just the IDs for the main response
+    promptfield_ids = [result["promptfield_id"] for result in results]
+    
+    response = {
+        "success": len(errors) == 0,
+        "message": f"Processed {len(results)} attributes successfully" + (f", {len(errors)} errors" if errors else ""),
+        "total_processed": len(request_data.attributes),
+        "successful_count": len(results),
+        "error_count": len(errors),
+        "promptfield_ids": promptfield_ids,
+        "detailed_results": results
+    }
+    
+    if errors:
+        response["errors"] = errors
+    
+    return response
+
+async def search_or_create_promptfield(attribute_name: str) -> str:
+    """Search for PromptField by name, create if not found, return record ID"""
+    
+    # Validate Bubble configuration
+    base_url = get_bubble_promptfield_base_url()
+    if not base_url or not BUBBLE_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bubble PromptField API configuration is missing. Please check environment variables."
+        )
+    
+    headers = {
+        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # First, search for existing record
+    search_params = {
+        "constraints": json.dumps([{
+            "key": "Name",
+            "constraint_type": "equals",
+            "value": attribute_name
+        }]),
+        "limit": 1
+    }
+    
+    try:
+        # Search for existing record
+        search_response = requests.get(base_url, headers=headers, params=search_params, timeout=30)
+        
+        if search_response.status_code == 200:
+            search_data = search_response.json()
+            results = search_data.get("response", {}).get("results", [])
+            
+            if results:
+                # Record found, return its ID
+                record_id = results[0].get("_id")
+                logger.info(f"Found existing PromptField record for '{attribute_name}': {record_id}")
+                return record_id
+        
+        # No existing record found, create new one
+        logger.info(f"No existing PromptField found for '{attribute_name}', creating new record")
+        
+        create_payload = {
+            "Name": attribute_name
+        }
+        
+        create_response = requests.post(base_url, headers=headers, json=create_payload, timeout=30)
+        
+        if create_response.status_code == 201:
+            create_data = create_response.json()
+            new_record_id = create_data.get("id")
+            logger.info(f"Created new PromptField record for '{attribute_name}': {new_record_id}")
+            return new_record_id
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to create PromptField record: {create_response.status_code} - {create_response.text}"
+            )
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
         )
