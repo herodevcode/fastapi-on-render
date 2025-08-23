@@ -1,0 +1,7 @@
+Generate a professional email response for the following scenario:
+
+Context: {context}
+Tone: {tone}
+Key points to address: {key_points}
+
+Please write a clear, professional email that addresses all the key points.

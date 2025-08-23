@@ -1,173 +1,162 @@
-Based on the Bubble API documentation, I'll help you add an endpoint to update records by adding connections to a list field. Here's how to implement this:
+adding a simple endpoint to read prompts stored as text files in your codebase. Here's what I recommend:
 
-1. First, let's update the environment configuration
+1. Create a prompts directory structure
+First, create a directory structure to organize your prompts:
 
-# ...existing code...
-BUBBLE_APP_DOMAIN = os.getenv("BUBBLE_APP_DOMAIN")
-BUBBLE_API_TOKEN = os.getenv("BUBBLE_API_TOKEN")
-BUBBLE_SAMPLE_DATA_TYPE = os.getenv("BUBBLE_SAMPLE_DATA_TYPE")
-BUBBLE_SAMPLE2_DATA_TYPE = os.getenv("BUBBLE_SAMPLE2_DATA_TYPE")  # Add this line
-BUBBLE_ENVIRONMENT = os.getenv("BUBBLE_ENVIRONMENT", "production")
-# ...existing code...
+mkdir prompts
 
-2. Add a new Pydantic model for the update request
+2. Add the prompt management endpoint
 
-# ...existing code...
-class BubbleRecordBatchCreate(BaseModel):
-    """Model for batch creating records in Bubble database"""
-    records: List[BubbleRecordCreate]
+import os
+from pathlib import Path
+// ...existing code...
+
+@app.get("/prompts/{prompt_name}", tags=["prompts"])
+async def get_prompt(prompt_name: str, api_key: str = Depends(get_api_key)):
+    """Get a prompt by name from stored text files"""
     
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "records": [
-                    {
-                        "name": "string",
-                        "description": "string"
-                    },
-                    {
-                        "name": "string",
-                        "description": "string"
-                    }
-                ]
-            }
-        }
-    }
-
-class BubbleRecordUpdateListField(BaseModel):
-    """Model for updating a list field in a Bubble record"""
-    sample2_id: str
+    # Define the prompts directory
+    prompts_dir = Path("prompts")
     
-    class Config:
-        schema_extra = {
-            "example": {
-                "sample2_id": "1755912306378x688197843685340200"
-            }
-        }
-# ...existing code...
-
-3. Add the new endpoint for updating records
-
-# ...existing code...
-@app.post("/bubble/sample-records/batch", tags=["bubble"])
-async def create_bubble_sample_records_batch(batch_data: BubbleRecordBatchCreate, api_key: str = Depends(get_api_key)):
-    # ...existing code...
-
-@app.patch("/bubble/sample-records/{record_id}/add-sample2", tags=["bubble"])
-async def add_sample2_to_record_list(
-    record_id: str, 
-    update_data: BubbleRecordUpdateListField, 
-    api_key: str = Depends(get_api_key)
-):
-    """Add a Sample2 record to the list_of_sample2 field of a Sample record"""
+    # Sanitize the prompt name to prevent directory traversal
+    safe_prompt_name = "".join(c for c in prompt_name if c.isalnum() or c in ('-', '_', '.'))
     
-    # Validate Bubble configuration
-    base_url = get_bubble_base_url()
-    if not base_url or not BUBBLE_API_TOKEN:
+    # Look for the prompt file with .txt extension
+    prompt_file = prompts_dir / f"{safe_prompt_name}.txt"
+    
+    # Check if file exists
+    if not prompt_file.exists():
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Bubble API configuration is missing. Please check environment variables."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Prompt '{prompt_name}' not found"
         )
-    
-    if not BUBBLE_SAMPLE2_DATA_TYPE:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="BUBBLE_SAMPLE2_DATA_TYPE is not configured. Please check environment variables."
-        )
-    
-    # Prepare the update payload
-    # In Bubble, to add to a list field, you use the ":add" operator
-    payload = {
-        "list_of_sample2:add": [update_data.sample2_id]
-    }
-    
-    # Prepare request
-    url = f"{base_url}/{record_id}"
-    headers = {
-        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    
-    logger.info(f"Updating record {record_id} with payload: {payload}")
-    logger.info(f"Request URL: {url}")
     
     try:
-        # Make PATCH request to Bubble API
-        response = requests.patch(url, headers=headers, json=payload, timeout=30)
+        # Read the prompt content
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            prompt_content = f.read()
         
-        logger.info(f"Response status: {response.status_code}")
-        logger.info(f"Response content: {response.text}")
+        return {
+            "success": True,
+            "prompt_name": prompt_name,
+            "content": prompt_content,
+            "file_path": str(prompt_file)
+        }
         
-        if response.status_code == 200:
-            response_data = response.json()
-            return {
-                "success": True,
-                "message": f"Successfully added Sample2 record {update_data.sample2_id} to Sample record {record_id}",
-                "record_id": record_id,
-                "added_sample2_id": update_data.sample2_id,
-                "data": response_data
-            }
-        elif response.status_code == 400:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid data provided or record not found: {response.text}"
-            )
-        elif response.status_code == 401:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid Bubble API token"
-            )
-        elif response.status_code == 403:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Permission denied. Check Bubble privacy rules and API settings."
-            )
-        elif response.status_code == 404:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Sample record with ID {record_id} not found"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Bubble API error: {response.status_code} - {response.text}"
-            )
-            
-    except requests.exceptions.RequestException as e:
-        logger.error(f"Request exception: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to connect to Bubble API: {str(e)}"
-        )
     except Exception as e:
-        logger.error(f"Unexpected error: {e}")
+        logger.error(f"Error reading prompt file '{prompt_file}': {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unexpected error: {str(e)}"
+            detail=f"Failed to read prompt file: {str(e)}"
         )
 
-4. Update your .env file
+@app.get("/prompts", tags=["prompts"])
+async def list_prompts(api_key: str = Depends(get_api_key)):
+    """List all available prompts"""
+    
+    prompts_dir = Path("prompts")
+    
+    # Create prompts directory if it doesn't exist
+    prompts_dir.mkdir(exist_ok=True)
+    
+    try:
+        # Get all .txt files in the prompts directory
+        prompt_files = list(prompts_dir.glob("*.txt"))
+        
+        prompts = []
+        for prompt_file in prompt_files:
+            prompt_name = prompt_file.stem  # filename without extension
+            try:
+                # Get basic info about each prompt
+                with open(prompt_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    preview = content[:100] + "..." if len(content) > 100 else content
+                
+                prompts.append({
+                    "name": prompt_name,
+                    "file_path": str(prompt_file),
+                    "size_chars": len(content),
+                    "preview": preview
+                })
+            except Exception as e:
+                logger.warning(f"Could not read prompt file '{prompt_file}': {str(e)}")
+                prompts.append({
+                    "name": prompt_name,
+                    "file_path": str(prompt_file),
+                    "error": str(e)
+                })
+        
+        return {
+            "success": True,
+            "total_prompts": len(prompts),
+            "prompts": prompts
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing prompts: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list prompts: {str(e)}"
+        )
 
-BUBBLE_SAMPLE2_DATA_TYPE=your_sample2_data_type_name
+3. Create some example prompt files
+Create some example prompts in the prompts directory:
 
-Add the new environment variable:
+# Create example prompts
+echo "You are a helpful AI assistant. Please answer the user's question clearly and concisely." > prompts/general-assistant.txt
 
-Key Points:
-List Field Updates: In Bubble's Data API, to add items to a list field, you use the :add operator with the field name (e.g., "list_of_sample2:add": [item_id])
+echo "Analyze the following data and provide insights:
 
-HTTP Method: We use PATCH for partial updates, which is the standard RESTful approach for modifying specific fields
+Data: {data}
 
-Validation: The endpoint validates that both the main data type and the sample2 data type are configured
+Please provide:
+1. Key patterns or trends
+2. Notable observations
+3. Recommendations based on the analysis" > prompts/data-analysis.txt
 
-Error Handling: Comprehensive error handling for various HTTP status codes that Bubble might return
+echo "Generate a professional email response for the following scenario:
 
-Logging: Added detailed logging to help debug any issues
+Context: {context}
+Tone: {tone}
+Key points to address: {key_points}
 
-Usage Example:
-PATCH /bubble/sample-records/1755912306378x688197843685340200/add-sample2
-{
-  "sample2_id": "1755912306378x688197843685340201"
-}
-This will add the Sample2 record with the specified ID to the list_of_sample2 field of the Sample record.
+Please write a clear, professional email that addresses all the key points." > prompts/email-generator.txt
 
-You can also create similar endpoints for removing items from the list using the :remove operator, or for other list operations as needed.
+
+I suggest adding a simple endpoint to read prompts stored as text files in your codebase. Here's what I recommend:
+
+1. Create a prompts directory structure
+First, create a directory structure to organize your prompts:
+
+2. Add the prompt management endpoint
+3. Create some example prompt files
+Create some example prompts in the prompts directory:
+
+4. Optional: Add a Pydantic model for better response structure
+
+// ...existing code...
+
+class PromptResponse(BaseModel):
+    success: bool
+    prompt_name: str
+    content: str
+    file_path: str
+
+class PromptListItem(BaseModel):
+    name: str
+    file_path: str
+    size_chars: Optional[int] = None
+    preview: Optional[str] = None
+    error: Optional[str] = None
+
+class PromptListResponse(BaseModel):
+    success: bool
+    total_prompts: int
+    prompts: List[PromptListItem]
+
+5. Usage Examples
+Once deployed, you can use the endpoints like:
+
+GET /prompts - List all available prompts
+GET /prompts/general-assistant - Get the general assistant prompt
+GET /prompts/data-analysis - Get the data analysis prompt

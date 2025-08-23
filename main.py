@@ -2,6 +2,7 @@ from typing import Optional
 import requests
 import json
 import logging
+from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.responses import RedirectResponse
@@ -17,7 +18,10 @@ from models import (
     GeneratedPromptBatchCreate,
     PromptFieldAndGeneratedPromptBatchCreate,
     ApiRequestUpdate,
-    ApiRequestProcessAndUpdate
+    ApiRequestProcessAndUpdate,
+    PromptResponse,
+    PromptListItem,
+    PromptListResponse
 )
 
 # Import routers
@@ -856,4 +860,92 @@ async def process_and_update_api_request(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error: {str(e)}"
+        )
+
+@app.get("/prompts/{prompt_name}", tags=["prompts"], response_model=PromptResponse)
+async def get_prompt(prompt_name: str, api_key: str = Depends(get_api_key)):
+    """Get a prompt by name from stored text files"""
+    
+    # Define the prompts directory
+    prompts_dir = Path("prompts")
+    
+    # Sanitize the prompt name to prevent directory traversal
+    safe_prompt_name = "".join(c for c in prompt_name if c.isalnum() or c in ('-', '_', '.'))
+    
+    # Look for the prompt file with .txt extension
+    prompt_file = prompts_dir / f"{safe_prompt_name}.txt"
+    
+    # Check if file exists
+    if not prompt_file.exists():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Prompt '{prompt_name}' not found"
+        )
+    
+    try:
+        # Read the prompt content
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            prompt_content = f.read()
+        
+        return PromptResponse(
+            success=True,
+            prompt_name=prompt_name,
+            content=prompt_content,
+            file_path=str(prompt_file)
+        )
+        
+    except Exception as e:
+        logger.error(f"Error reading prompt file '{prompt_file}': {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to read prompt file: {str(e)}"
+        )
+
+@app.get("/prompts", tags=["prompts"], response_model=PromptListResponse)
+async def list_prompts(api_key: str = Depends(get_api_key)):
+    """List all available prompts"""
+    
+    prompts_dir = Path("prompts")
+    
+    # Create prompts directory if it doesn't exist
+    prompts_dir.mkdir(exist_ok=True)
+    
+    try:
+        # Get all .txt files in the prompts directory
+        prompt_files = list(prompts_dir.glob("*.txt"))
+        
+        prompts = []
+        for prompt_file in prompt_files:
+            prompt_name = prompt_file.stem  # filename without extension
+            try:
+                # Get basic info about each prompt
+                with open(prompt_file, 'r', encoding='utf-8') as f:
+                    content = f.read()
+                    preview = content[:100] + "..." if len(content) > 100 else content
+                
+                prompts.append(PromptListItem(
+                    name=prompt_name,
+                    file_path=str(prompt_file),
+                    size_chars=len(content),
+                    preview=preview
+                ))
+            except Exception as e:
+                logger.warning(f"Could not read prompt file '{prompt_file}': {str(e)}")
+                prompts.append(PromptListItem(
+                    name=prompt_name,
+                    file_path=str(prompt_file),
+                    error=str(e)
+                ))
+        
+        return PromptListResponse(
+            success=True,
+            total_prompts=len(prompts),
+            prompts=prompts
+        )
+        
+    except Exception as e:
+        logger.error(f"Error listing prompts: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list prompts: {str(e)}"
         )

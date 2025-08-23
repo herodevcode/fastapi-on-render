@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 class AttributeValue(BaseModel):
     """Model for attribute-value pair"""
@@ -236,6 +236,72 @@ class ApiRequestProcessAndUpdate(BaseModel):
                     }
                 ],
                 "bubble_environment": "version-test"
+            }
+        }
+    }
+
+class PromptResponse(BaseModel):
+    """Model for prompt file response"""
+    success: bool
+    prompt_name: str
+    content: str
+    file_path: str
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "success": True,
+                "prompt_name": "general-assistant",
+                "content": "You are a helpful AI assistant. Please answer the user's question clearly and concisely.",
+                "file_path": "prompts/general-assistant.txt"
+            }
+        }
+    }
+
+class PromptListItem(BaseModel):
+    """Model for individual prompt item in list"""
+    name: str
+    file_path: str
+    size_chars: Optional[int] = None
+    preview: Optional[str] = None
+    error: Optional[str] = None
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "name": "general-assistant",
+                "file_path": "prompts/general-assistant.txt",
+                "size_chars": 87,
+                "preview": "You are a helpful AI assistant. Please answer the user's question clearly and concisely."
+            }
+        }
+    }
+
+class PromptListResponse(BaseModel):
+    """Model for listing all available prompts"""
+    success: bool
+    total_prompts: int
+    prompts: List[PromptListItem]
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "success": True,
+                "total_prompts": 2,
+                "prompts": [
+                    {
+                        "name": "general-assistant",
+                        "file_path": "prompts/general-assistant.txt",
+                        "size_chars": 87,
+                        "preview": "You are a helpful AI assistant. Please answer the user's question clearly and concisely."
+                    },
+                    {
+                        "name": "data-analysis",
+                        "file_path": "prompts/data-analysis.txt",
+                        "size_chars": 156,
+                        "preview": "Analyze the following data and provide insights:\n\nData: {data}\n\nPlease provide:\n1. Key patterns or tr..."
+                    }
+                ]
             }
         }
     }
