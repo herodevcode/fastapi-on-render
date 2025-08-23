@@ -19,7 +19,8 @@ from models import (
     GeneratedPromptCreate, 
     GeneratedPromptBatchCreate,
     PromptFieldAndGeneratedPromptBatchCreate,
-    ApiRequestUpdate
+    ApiRequestUpdate,
+    ApiRequestProcessAndUpdate
 )
 
 # Configure logging
@@ -1087,6 +1088,245 @@ async def update_api_request(
                 detail=f"Bubble API error: {response.status_code} - {response.text}"
             )
             
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request exception: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
+        )
+
+@app.post("/bubble/api-requests/process-and-update", tags=["bubble"])
+async def process_and_update_api_request(
+    request_data: ApiRequestProcessAndUpdate,
+    api_key: str = Depends(get_api_key)
+):
+    """Process attributes to create PromptFields and GeneratedPrompts, then update the API Request record with the results"""
+    
+    try:
+        # Step 1: Process attributes to create PromptFields and GeneratedPrompts
+        logger.info(f"Processing {len(request_data.attributes)} attributes for API Request {request_data.request_id}")
+        
+        # Create the batch request data for PromptFields and GeneratedPrompts
+        batch_request = PromptFieldAndGeneratedPromptBatchCreate(
+            attributes=request_data.attributes,
+            bubble_environment=request_data.bubble_environment
+        )
+        
+        # Call the existing logic for creating PromptFields and GeneratedPrompts
+        if not settings.BUBBLE_PROMPTFIELD_DATA_TYPE or not settings.BUBBLE_GENERATEDPROMPT_DATA_TYPE:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="BUBBLE_PROMPTFIELD_DATA_TYPE or BUBBLE_GENERATEDPROMPT_DATA_TYPE is not configured."
+            )
+        
+        generated_prompt_records = []
+        promptfield_results = []
+        promptfield_errors = []
+        
+        # Process each attribute to get/create PromptField and prepare GeneratedPrompt data
+        for i, attr_value in enumerate(request_data.attributes):
+            try:
+                # Get or create PromptField
+                promptfield_id = await search_or_create_promptfield(attr_value.attribute, request_data.bubble_environment)
+                
+                # Prepare GeneratedPrompt record
+                generated_prompt_records.append(GeneratedPromptCreate(
+                    promptfield_id=promptfield_id,
+                    value=attr_value.value
+                ))
+                
+                promptfield_results.append({
+                    "attribute": attr_value.attribute,
+                    "value": attr_value.value,
+                    "promptfield_id": promptfield_id,
+                    "index": i
+                })
+                
+            except Exception as e:
+                error_detail = {
+                    "attribute": attr_value.attribute,
+                    "value": attr_value.value,
+                    "index": i,
+                    "error": str(e)
+                }
+                promptfield_errors.append(error_detail)
+                logger.error(f"Error processing attribute '{attr_value.attribute}': {str(e)}")
+        
+        # If we have errors in PromptField processing, return early
+        if promptfield_errors:
+            return {
+                "success": False,
+                "message": f"Failed to process {len(promptfield_errors)} out of {len(request_data.attributes)} attributes",
+                "step": "promptfield_processing",
+                "total_processed": len(request_data.attributes),
+                "successful_promptfield_count": len(promptfield_results),
+                "error_count": len(promptfield_errors),
+                "errors": promptfield_errors
+            }
+        
+        # Step 2: Batch create GeneratedPrompts
+        logger.info(f"Creating {len(generated_prompt_records)} GeneratedPrompt records")
+        
+        base_url = get_bubble_generatedprompt_base_url(request_data.bubble_environment)
+        if not base_url or not settings.BUBBLE_API_TOKEN:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Bubble GeneratedPrompt API configuration is missing."
+            )
+        
+        # Format data as newline-separated JSON objects
+        bulk_data_lines = []
+        for record in generated_prompt_records:
+            record_json = {
+                "PromptField": record.promptfield_id,
+                "Value": record.value
+            }
+            bulk_data_lines.append(json.dumps(record_json))
+        
+        bulk_data = "\n".join(bulk_data_lines)
+        
+        # Prepare request to bulk endpoint
+        url = f"{base_url}/bulk"
+        headers = {
+            "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
+            "Content-Type": "text/plain"
+        }
+        
+        # Make request to Bubble API for GeneratedPrompts
+        response = requests.post(url, headers=headers, data=bulk_data, timeout=30)
+        
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Failed to create GeneratedPrompts: {response.status_code} - {response.text}"
+            )
+        
+        # Parse GeneratedPrompt creation response
+        response_lines = response.text.strip().split('\n')
+        parsed_responses = []
+        
+        for line in response_lines:
+            if line.strip():
+                parsed_responses.append(json.loads(line))
+        
+        # Extract created GeneratedPrompt IDs
+        generated_prompt_ids = []
+        successful_gp_count = 0
+        gp_creation_errors = []
+        
+        for i, resp in enumerate(parsed_responses):
+            if resp.get("status") == "success":
+                successful_gp_count += 1
+                if "id" in resp:
+                    generated_prompt_ids.append(resp["id"])
+                    # Add the generated_prompt_id to our results
+                    if i < len(promptfield_results):
+                        promptfield_results[i]["generated_prompt_id"] = resp["id"]
+            else:
+                gp_creation_errors.append({
+                    "index": i,
+                    "error": resp,
+                    "attribute": promptfield_results[i]["attribute"] if i < len(promptfield_results) else "unknown"
+                })
+        
+        if gp_creation_errors:
+            return {
+                "success": False,
+                "message": f"Failed to create {len(gp_creation_errors)} GeneratedPrompt records",
+                "step": "generatedprompt_creation",
+                "total_attributes": len(request_data.attributes),
+                "promptfield_processing_successful": len(promptfield_results),
+                "generated_prompt_creation_successful": successful_gp_count,
+                "generated_prompt_creation_errors": gp_creation_errors
+            }
+        
+        # Step 3: Update API Request record with the results
+        logger.info(f"Updating API Request {request_data.request_id} with {len(generated_prompt_ids)} GeneratedPrompt IDs")
+        
+        # Prepare update data for API Request
+        api_update_data = ApiRequestUpdate(
+            json_prompt=request_data.attributes,
+            generated_prompts=generated_prompt_ids,
+            bubble_environment=request_data.bubble_environment
+        )
+        
+        # Get API Request base URL
+        api_request_base_url = get_bubble_api_request_base_url(request_data.bubble_environment)
+        if not api_request_base_url:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Bubble API Request configuration is missing."
+            )
+        
+        # Format JSON prompt field for Bubble
+        json_prompt_formatted = []
+        for item in api_update_data.json_prompt:
+            json_prompt_formatted.append({
+                "attribute": item.attribute,
+                "value": item.value
+            })
+        
+        # Prepare update payload
+        update_payload = {
+            "jsonPrompt": json.dumps(json_prompt_formatted),
+            "GeneratedPrompts": api_update_data.generated_prompts
+        }
+        
+        # URL for the specific API Request record
+        update_url = f"{api_request_base_url}/{request_data.request_id}"
+        update_headers = {
+            "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        # Make PATCH request to update API Request
+        update_response = requests.patch(update_url, headers=update_headers, json=update_payload, timeout=30)
+        
+        logger.info(f"API Request update response status: {update_response.status_code}")
+        
+        if update_response.status_code not in [200, 204]:
+            logger.error(f"Failed to update API Request: {update_response.text}")
+            return {
+                "success": False,
+                "message": f"Successfully created PromptFields and GeneratedPrompts, but failed to update API Request: {update_response.status_code}",
+                "step": "api_request_update",
+                "generated_prompt_ids": generated_prompt_ids,
+                "update_error": update_response.text,
+                "partial_success": True
+            }
+        
+        # Parse API Request update response
+        if update_response.status_code == 204:
+            api_response_data = {
+                "status": "success",
+                "message": "API Request record updated successfully"
+            }
+        else:
+            api_response_data = update_response.json()
+        
+        # Return comprehensive success response
+        return {
+            "success": True,
+            "message": f"Successfully processed {len(request_data.attributes)} attributes and updated API Request {request_data.request_id}",
+            "request_id": request_data.request_id,
+            "total_attributes": len(request_data.attributes),
+            "promptfield_processing_successful": len(promptfield_results),
+            "generated_prompt_creation_successful": successful_gp_count,
+            "generated_prompt_ids": generated_prompt_ids,
+            "api_request_update_status": update_response.status_code,
+            "detailed_results": promptfield_results,
+            "api_request_response": api_response_data
+        }
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
     except requests.exceptions.RequestException as e:
         logger.error(f"Request exception: {e}")
         raise HTTPException(

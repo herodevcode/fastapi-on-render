@@ -206,3 +206,36 @@ class ApiRequestUpdate(BaseModel):
             }
         }
     }
+
+class ApiRequestProcessAndUpdate(BaseModel):
+    """Model for processing attributes to create PromptFields/GeneratedPrompts and updating an API request record"""
+    request_id: str
+    attributes: List[AttributeValue]
+    bubble_environment: Literal["production", "version-test"] = "version-test"
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "request_id": "1755878226412x138224706807443800",
+                "attributes": [
+                    {
+                        "attribute": "subject",
+                        "value": "A complete description of the primary and secondary subjects, including their appearance, attire, and actions."
+                    },
+                    {
+                        "attribute": "composition",
+                        "value": "A description of the shot type, camera angle, and framing, including layout details like foreground/background and use of compositional rules."
+                    },
+                    {
+                        "attribute": "environment",
+                        "value": "A description of the location, time of day, weather, and overall atmosphere."
+                    },
+                    {
+                        "attribute": "style",
+                        "value": "A description of the medium (e.g., photo, painting), artistic look, lighting, color palette, and any technical details like depth of field or film grain."
+                    }
+                ],
+                "bubble_environment": "version-test"
+            }
+        }
+    }
