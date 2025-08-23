@@ -1,10 +1,7 @@
 from typing import Optional
-import os
 import requests
 import json
 import logging
-from pathlib import Path
-from dotenv import load_dotenv
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import APIKeyHeader
@@ -12,6 +9,7 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Dict, Any, List
 
+from config import settings
 from models import (
     AttributeValue, 
     PromptFieldBatchRequest, 
@@ -28,71 +26,53 @@ from models import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Load environment variables
-root_dir = Path(__file__).parent
-env_path = root_dir / ".env"
-load_dotenv(dotenv_path=env_path)
-
 app = FastAPI()
 
 # Define the API key header
 api_key_header = APIKeyHeader(name="X-API-Key")
 
-# Define the expected API key (in production, use environment variables)
-API_KEY = "your-secret-api-key"
-
-# Bubble API configuration
-BUBBLE_APP_DOMAIN = os.getenv("BUBBLE_APP_DOMAIN")
-BUBBLE_API_TOKEN = os.getenv("BUBBLE_API_TOKEN")
-BUBBLE_SAMPLE_DATA_TYPE = os.getenv("BUBBLE_SAMPLE_DATA_TYPE")
-BUBBLE_SAMPLE2_DATA_TYPE = os.getenv("BUBBLE_SAMPLE2_DATA_TYPE")
-BUBBLE_PROMPTFIELD_DATA_TYPE = os.getenv("BUBBLE_PROMPTFIELD_DATA_TYPE")
-BUBBLE_GENERATEDPROMPT_DATA_TYPE = os.getenv("BUBBLE_GENERATEDPROMPT_DATA_TYPE")
-BUBBLE_API_REQUEST_DATA_TYPE = os.getenv("BUBBLE_API_REQUEST_DATA_TYPE")
-BUBBLE_ENVIRONMENT = os.getenv("BUBBLE_ENVIRONMENT", "production")
-
 def get_bubble_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble API based on environment"""
-    if not BUBBLE_APP_DOMAIN or not BUBBLE_SAMPLE_DATA_TYPE:
+    if not settings.BUBBLE_APP_DOMAIN or not settings.BUBBLE_SAMPLE_DATA_TYPE:
         return None
     
     if environment == "version-test":
-        return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_SAMPLE_DATA_TYPE}"
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{settings.BUBBLE_SAMPLE_DATA_TYPE}"
     else:
-        return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_SAMPLE_DATA_TYPE}"
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/api/1.1/obj/{settings.BUBBLE_SAMPLE_DATA_TYPE}"
 
 def get_bubble_promptfield_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble PromptField API based on environment"""
-    if not BUBBLE_APP_DOMAIN or not BUBBLE_PROMPTFIELD_DATA_TYPE:
+    if not settings.BUBBLE_APP_DOMAIN or not settings.BUBBLE_PROMPTFIELD_DATA_TYPE:
         return None
     
     if environment == "version-test":
-        return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_PROMPTFIELD_DATA_TYPE}"
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{settings.BUBBLE_PROMPTFIELD_DATA_TYPE}"
     else:
-        return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_PROMPTFIELD_DATA_TYPE}"
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/api/1.1/obj/{settings.BUBBLE_PROMPTFIELD_DATA_TYPE}"
 
 def get_bubble_generatedprompt_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble GeneratedPrompt API based on environment"""
-    if not BUBBLE_APP_DOMAIN or not BUBBLE_GENERATEDPROMPT_DATA_TYPE:
+    if not settings.BUBBLE_APP_DOMAIN or not settings.BUBBLE_GENERATEDPROMPT_DATA_TYPE:
         return None
     
     if environment == "version-test":
-        return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_GENERATEDPROMPT_DATA_TYPE}"
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{settings.BUBBLE_GENERATEDPROMPT_DATA_TYPE}"
     else:
-        return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_GENERATEDPROMPT_DATA_TYPE}"
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/api/1.1/obj/{settings.BUBBLE_GENERATEDPROMPT_DATA_TYPE}"
 
 def get_bubble_api_request_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble API Request based on environment"""
-    if not BUBBLE_APP_DOMAIN or not BUBBLE_API_REQUEST_DATA_TYPE:
+    if not settings.BUBBLE_APP_DOMAIN or not settings.BUBBLE_API_REQUEST_DATA_TYPE:
         return None
     
     if environment == "version-test":
-        return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_API_REQUEST_DATA_TYPE}"
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{settings.BUBBLE_API_REQUEST_DATA_TYPE}"
     else:
-        return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_API_REQUEST_DATA_TYPE}"
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/api/1.1/obj/{settings.BUBBLE_API_REQUEST_DATA_TYPE}"
 
 async def get_api_key(api_key: str = Depends(api_key_header)):
-    if api_key != API_KEY:
+    if api_key != settings.API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key"
@@ -118,7 +98,7 @@ async def search_bubble_sample_records_by_name(
     
     # Validate Bubble configuration
     base_url = get_bubble_base_url(bubble_environment)
-    if not base_url or not BUBBLE_API_TOKEN:
+    if not base_url or not settings.BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Bubble API configuration is missing. Please check environment variables."
@@ -127,7 +107,7 @@ async def search_bubble_sample_records_by_name(
     # Prepare request with search constraints
     url = base_url
     headers = {
-        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
         "Content-Type": "application/json"
     }
     
@@ -200,7 +180,7 @@ async def get_bubble_sample_record(
     
     # Validate Bubble configuration
     base_url = get_bubble_base_url(bubble_environment)
-    if not base_url or not BUBBLE_API_TOKEN:
+    if not base_url or not settings.BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Bubble API configuration is missing. Please check environment variables."
@@ -209,7 +189,7 @@ async def get_bubble_sample_record(
     # Prepare request
     url = f"{base_url}/{record_id}"
     headers = {
-        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
         "Content-Type": "application/json"
     }
     
@@ -246,7 +226,7 @@ async def create_bubble_sample_record(record_data: BubbleRecordCreate, api_key: 
     
     # Validate Bubble configuration
     base_url = get_bubble_base_url(record_data.bubble_environment)
-    if not base_url or not BUBBLE_API_TOKEN:
+    if not base_url or not settings.BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Bubble API configuration is missing. Please check environment variables."
@@ -261,7 +241,7 @@ async def create_bubble_sample_record(record_data: BubbleRecordCreate, api_key: 
     # Prepare request
     url = base_url
     headers = {
-        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
         "Content-Type": "application/json"
     }
     
@@ -310,7 +290,7 @@ async def create_bubble_sample_records_batch(batch_data: BubbleRecordBatchCreate
     
     # Validate Bubble configuration
     base_url = get_bubble_base_url(batch_data.bubble_environment)
-    if not base_url or not BUBBLE_API_TOKEN:
+    if not base_url or not settings.BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Bubble API configuration is missing. Please check environment variables."
@@ -335,7 +315,7 @@ async def create_bubble_sample_records_batch(batch_data: BubbleRecordBatchCreate
     # Prepare request to bulk endpoint
     url = f"{base_url}/bulk"
     headers = {
-        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
         "Content-Type": "text/plain"
     }
     
@@ -449,13 +429,13 @@ async def add_sample2_to_record_list(
     
     # Validate Bubble configuration
     base_url = get_bubble_base_url(update_data.bubble_environment)
-    if not base_url or not BUBBLE_API_TOKEN:
+    if not base_url or not settings.BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Bubble API configuration is missing. Please check environment variables."
         )
     
-    if not BUBBLE_SAMPLE2_DATA_TYPE:
+    if not settings.BUBBLE_SAMPLE2_DATA_TYPE:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="BUBBLE_SAMPLE2_DATA_TYPE is not configured. Please check environment variables."
@@ -466,7 +446,7 @@ async def add_sample2_to_record_list(
     # First, get the current record to see existing list values
     url = f"{base_url}/{record_id}"
     headers = {
-        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
         "Content-Type": "application/json"
     }
     
@@ -600,7 +580,7 @@ async def process_promptfield_attributes(
 ):
     """Process a list of attribute-value pairs and return PromptField record IDs"""
     
-    if not BUBBLE_PROMPTFIELD_DATA_TYPE:
+    if not settings.BUBBLE_PROMPTFIELD_DATA_TYPE:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="BUBBLE_PROMPTFIELD_DATA_TYPE is not configured. Please check environment variables."
@@ -654,14 +634,14 @@ async def search_or_create_promptfield(attribute_name: str, environment: str = "
     
     # Validate Bubble configuration
     base_url = get_bubble_promptfield_base_url(environment)
-    if not base_url or not BUBBLE_API_TOKEN:
+    if not base_url or not settings.BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Bubble PromptField API configuration is missing. Please check environment variables."
         )
     
     headers = {
-        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
         "Content-Type": "application/json"
     }
     
@@ -724,7 +704,7 @@ async def create_generated_prompts_batch(
     
     # Validate Bubble configuration
     base_url = get_bubble_generatedprompt_base_url(batch_data.bubble_environment)
-    if not base_url or not BUBBLE_API_TOKEN:
+    if not base_url or not settings.BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Bubble GeneratedPrompt API configuration is missing. Please check environment variables."
@@ -749,7 +729,7 @@ async def create_generated_prompts_batch(
     # Prepare request to bulk endpoint
     url = f"{base_url}/bulk"
     headers = {
-        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
         "Content-Type": "text/plain"
     }
     
@@ -860,7 +840,7 @@ async def create_promptfields_and_generated_prompts_batch(
 ):
     """Process attributes to create/find PromptFields and create corresponding GeneratedPrompts, returning GeneratedPrompt IDs"""
     
-    if not BUBBLE_PROMPTFIELD_DATA_TYPE or not BUBBLE_GENERATEDPROMPT_DATA_TYPE:
+    if not settings.BUBBLE_PROMPTFIELD_DATA_TYPE or not settings.BUBBLE_GENERATEDPROMPT_DATA_TYPE:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="BUBBLE_PROMPTFIELD_DATA_TYPE or BUBBLE_GENERATEDPROMPT_DATA_TYPE is not configured. Please check environment variables."
@@ -922,7 +902,7 @@ async def create_promptfields_and_generated_prompts_batch(
         
         # Use the existing batch create logic
         base_url = get_bubble_generatedprompt_base_url(request_data.bubble_environment)
-        if not base_url or not BUBBLE_API_TOKEN:
+        if not base_url or not settings.BUBBLE_API_TOKEN:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Bubble GeneratedPrompt API configuration is missing. Please check environment variables."
@@ -942,7 +922,7 @@ async def create_promptfields_and_generated_prompts_batch(
         # Prepare request to bulk endpoint
         url = f"{base_url}/bulk"
         headers = {
-            "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+            "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
             "Content-Type": "text/plain"
         }
         
@@ -1030,7 +1010,7 @@ async def update_api_request(
     
     # Validate Bubble configuration
     base_url = get_bubble_api_request_base_url(update_data.bubble_environment)
-    if not base_url or not BUBBLE_API_TOKEN:
+    if not base_url or not settings.BUBBLE_API_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Bubble API Request configuration is missing. Please check environment variables."
@@ -1053,7 +1033,7 @@ async def update_api_request(
     # URL for the specific record
     url = f"{base_url}/{request_id}"
     headers = {
-        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
         "Content-Type": "application/json"
     }
     
