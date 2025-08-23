@@ -6,6 +6,8 @@ from dotenv import load_dotenv
 
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.security import APIKeyHeader
+from pydantic import BaseModel
+from typing import Dict, Any
 
 # Load environment variables
 root_dir = Path(__file__).parent
@@ -43,6 +45,19 @@ async def get_api_key(api_key: str = Depends(api_key_header)):
             detail="Invalid or missing API key"
         )
     return api_key
+
+class BubbleRecordCreate(BaseModel):
+    """Model for creating a new record in Bubble database"""
+    name: str
+    description: str
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "name": "Sample Record",
+                "description": "This is a sample description for the record"
+            }
+        }
 
 @app.get("/")
 async def root():
@@ -85,6 +100,70 @@ async def get_bubble_record(record_id: str, api_key: str = Depends(get_api_key))
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Record with ID {record_id} not found"
+            )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Bubble API error: {response.status_code} - {response.text}"
+            )
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
+        )
+
+@app.post("/bubble/records")
+async def create_bubble_record(record_data: BubbleRecordCreate, api_key: str = Depends(get_api_key)):
+    """Create a new record in Bubble database"""
+    
+    # Validate Bubble configuration
+    base_url = get_bubble_base_url()
+    if not base_url or not BUBBLE_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bubble API configuration is missing. Please check environment variables."
+        )
+    
+    # Prepare request payload
+    payload = {
+        "name": record_data.name,
+        "description": record_data.description
+    }
+    
+    # Prepare request
+    url = base_url
+    headers = {
+        "Authorization": f"Bearer {BUBBLE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        # Make request to Bubble API
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 201:
+            response_data = response.json()
+            return {
+                "success": True,
+                "message": "Record created successfully",
+                "record_id": response_data.get("id"),
+                "data": response_data
+            }
+        elif response.status_code == 400:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid data provided: {response.text}"
+            )
+        elif response.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Bubble API token"
+            )
+        elif response.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. Check Bubble privacy rules and API settings."
             )
         else:
             raise HTTPException(
