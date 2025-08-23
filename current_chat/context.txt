@@ -1,0 +1,40 @@
+Based on the documentation, to create an endpoint in your Bubble app for creating or updating records, you should start with Bubble's Data API.
+
+Here is a basic guide to get you started:
+
+1. Enable the Data API in Bubble
+First, you need to enable the Data API and expose the specific data types you want to work with.
+
+In your Bubble editor, navigate to Settings > API.
+Check the box for Enable Data API.
+Once enabled, a list of your app's data types will appear. Check the box next to the data type you want to create or update records for (e.g., User, Product).
+2. Get Your API Token for Authentication
+To test the connection, the simplest method is to use a private API key which grants admin-level access.
+
+In the same Settings > API tab, scroll down to the API Keys section.
+Generate a new Private key. Give it a descriptive name.
+Copy this key. You will use it as a "Bearer token" to authenticate your requests.
+Important: Keep this key secret, as it provides full access to your app's data.
+
+3. Test the Connection
+You can now send a request from an API tool like Postman or using curl to test the connection. The goal is to create a new record.
+
+The endpoint URL to create a new object of a certain type is: POST https://<your-app-domain>/api/1.1/obj/<type-name>
+
+Replace <your-app-domain> with your app's domain (e.g., yourapp.bubbleapps.io) and <type-name> with the name of the data type you exposed.
+
+Here is an example using curl to create a new record in a type called item with a field named name:
+
+curl -X POST "https://<your-app-domain>/api/1.1/obj/item" \
+-H "Authorization: Bearer <your-api-token>" \
+-H "Content-Type: application/json" \
+-d '{
+  "name": "My Test Item"
+}'
+
+If successful, the API will respond with a 201 Created status and the unique ID of the new record.
+
+Next Steps: Updating a Record
+To update a record, you will make a PATCH or PUT request to the same endpoint, but you'll append the unique ID of the record you want to change.
+
+PATCH https://<your-app-domain>/api/1.1/obj/<type-name>/<record-id>
