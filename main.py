@@ -25,18 +25,18 @@ API_KEY = "your-secret-api-key"
 # Bubble API configuration
 BUBBLE_APP_DOMAIN = os.getenv("BUBBLE_APP_DOMAIN")
 BUBBLE_API_TOKEN = os.getenv("BUBBLE_API_TOKEN")
-BUBBLE_DATA_TYPE = os.getenv("BUBBLE_DATA_TYPE")
+BUBBLE_SAMPLE_DATA_TYPE = os.getenv("BUBBLE_SAMPLE_DATA_TYPE")
 BUBBLE_ENVIRONMENT = os.getenv("BUBBLE_ENVIRONMENT", "production")
 
 def get_bubble_base_url():
     """Get the base URL for Bubble API based on environment"""
-    if not BUBBLE_APP_DOMAIN or not BUBBLE_DATA_TYPE:
+    if not BUBBLE_APP_DOMAIN or not BUBBLE_SAMPLE_DATA_TYPE:
         return None
     
     if BUBBLE_ENVIRONMENT == "version-test":
-        return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_DATA_TYPE}"
+        return f"https://{BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{BUBBLE_SAMPLE_DATA_TYPE}"
     else:
-        return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_DATA_TYPE}"
+        return f"https://{BUBBLE_APP_DOMAIN}/api/1.1/obj/{BUBBLE_SAMPLE_DATA_TYPE}"
 
 async def get_api_key(api_key: str = Depends(api_key_header)):
     if api_key != API_KEY:
@@ -59,17 +59,17 @@ class BubbleRecordCreate(BaseModel):
             }
         }
 
-@app.get("/")
+@app.get("/", tags=["basic"])
 async def root():
     return {"message": "Hello World"}
 
-@app.get("/items/{item_id}")
+@app.get("/items/{item_id}", tags=["basic"])
 def read_item(item_id: int, q: Optional[str] = None, api_key: str = Depends(get_api_key)):
     return {"item_id": item_id, "q": q}
 
-@app.get("/bubble/records/{record_id}")
-async def get_bubble_record(record_id: str, api_key: str = Depends(get_api_key)):
-    """Fetch a specific record from Bubble database by ID. Use example: 1755912306378x688197843685340200"""
+@app.get("/bubble/sample-records/{record_id}", tags=["bubble"])
+async def get_bubble_sample_record(record_id: str, api_key: str = Depends(get_api_key)):
+    """Fetch a specific sample record from Bubble database by ID. Use example: 1755912306378x688197843685340200"""
     
     # Validate Bubble configuration
     base_url = get_bubble_base_url()
@@ -113,9 +113,9 @@ async def get_bubble_record(record_id: str, api_key: str = Depends(get_api_key))
             detail=f"Failed to connect to Bubble API: {str(e)}"
         )
 
-@app.post("/bubble/records")
-async def create_bubble_record(record_data: BubbleRecordCreate, api_key: str = Depends(get_api_key)):
-    """Create a new record in Bubble database"""
+@app.post("/bubble/sample-records", tags=["bubble"])
+async def create_bubble_sample_record(record_data: BubbleRecordCreate, api_key: str = Depends(get_api_key)):
+    """Create a new sample record in Bubble database"""
     
     # Validate Bubble configuration
     base_url = get_bubble_base_url()
@@ -146,7 +146,7 @@ async def create_bubble_record(record_data: BubbleRecordCreate, api_key: str = D
             response_data = response.json()
             return {
                 "success": True,
-                "message": "Record created successfully",
+                "message": "Sample record created successfully",
                 "record_id": response_data.get("id"),
                 "data": response_data
             }
