@@ -251,9 +251,9 @@ class PromptResponse(BaseModel):
         "json_schema_extra": {
             "example": {
                 "success": True,
-                "prompt_name": "general-assistant",
-                "content": "You are a helpful AI assistant. Please answer the user's question clearly and concisely.",
-                "file_path": "prompts/general-assistant.txt"
+                "prompt_name": "short",
+                "content": "You are a world-class visual analysis engine.\n\nYour task is to deconstruct a provided image or video and return a structured JSON object describing its visual characteristics...",
+                "file_path": "prompts/short.txt"
             }
         }
     }
@@ -269,10 +269,10 @@ class PromptListItem(BaseModel):
     model_config = {
         "json_schema_extra": {
             "example": {
-                "name": "general-assistant",
-                "file_path": "prompts/general-assistant.txt",
-                "size_chars": 87,
-                "preview": "You are a helpful AI assistant. Please answer the user's question clearly and concisely."
+                "name": "detailed",
+                "file_path": "prompts/detailed.txt",
+                "size_chars": 542,
+                "preview": "You are a world-class visual analysis engine.\n\nYour task is to meticulously deconstruct a provided image..."
             }
         }
     }
@@ -290,16 +290,16 @@ class PromptListResponse(BaseModel):
                 "total_prompts": 2,
                 "prompts": [
                     {
-                        "name": "general-assistant",
-                        "file_path": "prompts/general-assistant.txt",
-                        "size_chars": 87,
-                        "preview": "You are a helpful AI assistant. Please answer the user's question clearly and concisely."
+                        "name": "short",
+                        "file_path": "prompts/short.txt",
+                        "size_chars": 498,
+                        "preview": "You are a world-class visual analysis engine.\n\nYour task is to deconstruct a provided image or video..."
                     },
                     {
-                        "name": "data-analysis",
-                        "file_path": "prompts/data-analysis.txt",
-                        "size_chars": 156,
-                        "preview": "Analyze the following data and provide insights:\n\nData: {data}\n\nPlease provide:\n1. Key patterns or tr..."
+                        "name": "detailed",
+                        "file_path": "prompts/detailed.txt",
+                        "size_chars": 542,
+                        "preview": "You are a world-class visual analysis engine.\n\nYour task is to meticulously deconstruct a provided image..."
                     }
                 ]
             }

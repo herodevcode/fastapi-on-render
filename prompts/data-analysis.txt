@@ -1,8 +1,0 @@
-Analyze the following data and provide insights:
-
-Data: {data}
-
-Please provide:
-1. Key patterns or trends
-2. Notable observations
-3. Recommendations based on the analysis
