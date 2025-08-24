@@ -76,6 +76,16 @@ def get_bubble_api_request_base_url(environment: str = "version-test"):
     else:
         return f"https://{settings.BUBBLE_APP_DOMAIN}/api/1.1/obj/{settings.BUBBLE_API_REQUEST_DATA_TYPE}"
 
+def get_bubble_generic_base_url(data_type: str, environment: str = "version-test"):
+    """Get the base URL for any Bubble data type based on environment"""
+    if not settings.BUBBLE_APP_DOMAIN or not data_type:
+        return None
+    
+    if environment == "version-test":
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/version-test/api/1.1/obj/{data_type}"
+    else:
+        return f"https://{settings.BUBBLE_APP_DOMAIN}/api/1.1/obj/{data_type}"
+
 @app.get("/", tags=["basic"])
 async def root():
     return RedirectResponse(url="/docs")
@@ -948,4 +958,103 @@ async def list_prompts(api_key: str = Depends(get_api_key)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list prompts: {str(e)}"
+        )
+
+@app.get("/bubble/{data_type}/{record_id}", tags=["bubble"])
+async def get_bubble_record(
+    data_type: str,
+    record_id: str,
+    environment: str = "version-test",
+    api_key: str = Depends(get_api_key)
+):
+    """Get a Bubble record by data type and record ID"""
+    
+    # Validate Bubble configuration
+    base_url = get_bubble_generic_base_url(data_type, environment)
+    if not base_url or not settings.BUBBLE_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bubble API configuration is missing. Please check environment variables."
+        )
+    
+    # Sanitize data_type to prevent potential issues
+    safe_data_type = "".join(c for c in data_type if c.isalnum() or c in ('-', '_'))
+    if safe_data_type != data_type:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid data type format. Only alphanumeric characters, hyphens, and underscores are allowed."
+        )
+    
+    # Prepare headers
+    headers = {
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # URL for the specific record
+    url = f"{base_url}/{record_id}"
+    
+    logger.info(f"Fetching {data_type} record with ID: {record_id} from environment: {environment}")
+    
+    try:
+        # Make GET request to Bubble API
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        logger.info(f"Response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            try:
+                record_data = response.json()
+                
+                return {
+                    "success": True,
+                    "message": f"Successfully retrieved {data_type} record",
+                    "data_type": data_type,
+                    "record_id": record_id,
+                    "environment": environment,
+                    "record": record_data.get("response", record_data)
+                }
+                
+            except json.JSONDecodeError as json_err:
+                logger.error(f"JSON decode error: {json_err}")
+                logger.error(f"Raw response: {response.text}")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Failed to parse Bubble API response: {str(json_err)}"
+                )
+                
+        elif response.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Bubble API token"
+            )
+        elif response.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. Check Bubble privacy rules and API settings."
+            )
+        elif response.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Record with ID '{record_id}' not found in data type '{data_type}'"
+            )
+        else:
+            logger.error(f"Unexpected status code: {response.status_code}")
+            logger.error(f"Response text: {response.text}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Bubble API error: {response.status_code} - {response.text}"
+            )
+            
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request exception: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
         )
