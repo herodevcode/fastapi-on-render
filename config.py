@@ -10,11 +10,12 @@ class Settings(BaseSettings):
     # Bubble API Configuration
     BUBBLE_APP_DOMAIN: str
     BUBBLE_API_TOKEN: str
-    BUBBLE_SAMPLE_DATA_TYPE: str
-    BUBBLE_SAMPLE2_DATA_TYPE: str
-    BUBBLE_PROMPTFIELD_DATA_TYPE: str
-    BUBBLE_GENERATEDPROMPT_DATA_TYPE: str
-    BUBBLE_API_REQUEST_DATA_TYPE: str
+    BUBBLE_SAMPLE_DATA_TYPE: str = "sample"
+    BUBBLE_SAMPLE2_DATA_TYPE: str = "sample2"
+    BUBBLE_PROMPTFIELD_DATA_TYPE: str = "promptfield"
+    BUBBLE_GENERATEDPROMPT_DATA_TYPE: str = "generatedprompt"
+    BUBBLE_API_REQUEST_DATA_TYPE: str = "api_request"
+    BUBBLE_PROMPTTEMPLATE_DATA_TYPE: str = "prompttemplate"
     BUBBLE_ENVIRONMENT: str = "production"
 
 # Create a single instance to be imported in other files

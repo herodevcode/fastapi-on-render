@@ -21,7 +21,8 @@ from models import (
     ApiRequestProcessAndUpdate,
     PromptResponse,
     PromptListItem,
-    PromptListResponse
+    PromptListResponse,
+    PromptTemplateProcessedResponse
 )
 
 # Import routers
@@ -1057,4 +1058,131 @@ async def get_bubble_record(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Unexpected error: {str(e)}"
+        )
+
+@app.get("/prompts/{prompt_name}/process-template/{template_id}", tags=["prompts"], response_model=PromptTemplateProcessedResponse)
+async def get_processed_prompt_with_template(
+    prompt_name: str, 
+    template_id: str,
+    environment: str = "version-test",
+    api_key: str = Depends(get_api_key)
+):
+    """Get a prompt by name and process it with JSON template from PromptTemplate record"""
+    
+    try:
+        # Step 1: Get the prompt file content
+        prompts_dir = Path("prompts")
+        safe_prompt_name = "".join(c for c in prompt_name if c.isalnum() or c in ('-', '_', '.'))
+        prompt_file = prompts_dir / f"{safe_prompt_name}.txt"
+        
+        if not prompt_file.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Prompt '{prompt_name}' not found"
+            )
+        
+        # Read the prompt content
+        with open(prompt_file, 'r', encoding='utf-8') as f:
+            original_prompt_content = f.read()
+        
+        # Step 2: Get the PromptTemplate record from Bubble
+        if not settings.BUBBLE_PROMPTTEMPLATE_DATA_TYPE:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="BUBBLE_PROMPTTEMPLATE_DATA_TYPE is not configured. Please check environment variables."
+            )
+        
+        base_url = get_bubble_generic_base_url(settings.BUBBLE_PROMPTTEMPLATE_DATA_TYPE, environment)
+        if not base_url or not settings.BUBBLE_API_TOKEN:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Bubble API configuration is missing. Please check environment variables."
+            )
+        
+        headers = {
+            "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        # URL for the specific PromptTemplate record
+        url = f"{base_url}/{template_id}"
+        
+        logger.info(f"Fetching PromptTemplate record with ID: {template_id} from environment: {environment}")
+        
+        # Make GET request to Bubble API
+        response = requests.get(url, headers=headers, timeout=30)
+        
+        if response.status_code == 200:
+            try:
+                template_data = response.json()
+                template_record = template_data.get("response", template_data)
+                
+                # Extract the json_template field
+                json_template = template_record.get("json_template", "")
+                
+                if not json_template:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail=f"PromptTemplate record '{template_id}' does not have a json_template field or it's empty"
+                    )
+                
+            except json.JSONDecodeError as json_err:
+                logger.error(f"JSON decode error: {json_err}")
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Failed to parse Bubble API response: {str(json_err)}"
+                )
+                
+        elif response.status_code == 401:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Bubble API token"
+            )
+        elif response.status_code == 403:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Permission denied. Check Bubble privacy rules and API settings."
+            )
+        elif response.status_code == 404:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"PromptTemplate record with ID '{template_id}' not found"
+            )
+        else:
+            logger.error(f"Unexpected status code: {response.status_code}")
+            logger.error(f"Response text: {response.text}")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Bubble API error: {response.status_code} - {response.text}"
+            )
+        
+        # Step 3: Replace {{JSON_STRUCTURE}} placeholder in the prompt
+        processed_content = original_prompt_content.replace("{{JSON_STRUCTURE}}", json_template)
+        
+        logger.info(f"Successfully processed prompt '{prompt_name}' with template '{template_id}'")
+        
+        return PromptTemplateProcessedResponse(
+            success=True,
+            prompt_name=prompt_name,
+            template_id=template_id,
+            original_content=original_prompt_content,
+            processed_content=processed_content,
+            json_template=json_template,
+            file_path=str(prompt_file)
+        )
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Request exception: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Error processing prompt with template: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to process prompt with template: {str(e)}"
         )

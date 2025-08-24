@@ -305,3 +305,27 @@ class PromptListResponse(BaseModel):
             }
         }
     }
+
+class PromptTemplateProcessedResponse(BaseModel):
+    """Model for processed prompt response with template substitution"""
+    success: bool
+    prompt_name: str
+    template_id: str
+    original_content: str
+    processed_content: str
+    json_template: str
+    file_path: str
+    
+    model_config = {
+        "json_schema_extra": {
+            "example": {
+                "success": True,
+                "prompt_name": "short",
+                "template_id": "1755923027740x713483466029849500",
+                "original_content": "You are a visual analysis engine. Return a JSON object with this structure: {{JSON_STRUCTURE}}",
+                "processed_content": "You are a visual analysis engine. Return a JSON object with this structure: {\"subject\": \"string\", \"composition\": \"string\"}",
+                "json_template": "{\"subject\": \"string\", \"composition\": \"string\"}",
+                "file_path": "prompts/short.txt"
+            }
+        }
+    }
