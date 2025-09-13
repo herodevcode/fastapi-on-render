@@ -12,12 +12,5 @@ Your output must be a single, valid JSON object, and you must exclude any additi
 
 ## JSON Structure
 Your output must follow this structure:
-```
-{
-  "attribute": {attribute will be inserted},
-  "value": {...}
-}
-```
-Or as an array of such objects.
 
 {{JSON_STRUCTURE}}

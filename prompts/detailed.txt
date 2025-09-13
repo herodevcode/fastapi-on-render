@@ -12,12 +12,5 @@ This JSON will be used directly as a prompt for an AI image or video generator (
 
 ## JSON Structure
 Your output must follow this structure:
-```
-{
-  "attribute": {attribute will be inserted},
-  "value": {...}
-}
-```
-Or as an array of such objects.
 
 {{JSON_STRUCTURE}}
