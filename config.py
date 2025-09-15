@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     BUBBLE_API_REQUEST_DATA_TYPE: str = "api_request"
     BUBBLE_PROMPTTEMPLATE_DATA_TYPE: str = "prompttemplate"
     BUBBLE_ENVIRONMENT: str = "production"
+    BUBBLE_PROMPTTEMPLATECUSTOM_DATA_TYPE: str = "prompttemplatecustom"
 
 # Create a single instance to be imported in other files
 settings = Settings()

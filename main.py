@@ -1064,10 +1064,11 @@ async def get_bubble_record(
 async def get_processed_prompt_with_template(
     prompt_name: str, 
     template_id: str,
+    prompttemplatecustom_id: Optional[str] = None,
     environment: str = "version-test",
     api_key: str = Depends(get_api_key)
 ):
-    """Get a prompt by name and process it with JSON template from PromptTemplate record"""
+    """Get a prompt by name and process it with JSON template from PromptTemplate or PromptTemplateCustom record"""
     
     try:
         # Step 1: Get the prompt file content
@@ -1085,14 +1086,32 @@ async def get_processed_prompt_with_template(
         with open(prompt_file, 'r', encoding='utf-8') as f:
             original_prompt_content = f.read()
         
-        # Step 2: Get the PromptTemplate record from Bubble
-        if not settings.BUBBLE_PROMPTTEMPLATE_DATA_TYPE:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="BUBBLE_PROMPTTEMPLATE_DATA_TYPE is not configured. Please check environment variables."
-            )
+        # Step 2: Determine which data type and record ID to use
+        if prompttemplatecustom_id:
+            # Use PromptTemplateCustom data type
+            data_type = settings.BUBBLE_PROMPTTEMPLATECUSTOM_DATA_TYPE
+            record_id = prompttemplatecustom_id
+            template_source = "PromptTemplateCustom"
+            
+            if not data_type:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="BUBBLE_PROMPTTEMPLATECUSTOM_DATA_TYPE is not configured. Please check environment variables."
+                )
+        else:
+            # Use regular PromptTemplate data type
+            data_type = settings.BUBBLE_PROMPTTEMPLATE_DATA_TYPE
+            record_id = template_id
+            template_source = "PromptTemplate"
+            
+            if not data_type:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="BUBBLE_PROMPTTEMPLATE_DATA_TYPE is not configured. Please check environment variables."
+                )
         
-        base_url = get_bubble_generic_base_url(settings.BUBBLE_PROMPTTEMPLATE_DATA_TYPE, environment)
+        # Step 3: Get the template record from Bubble
+        base_url = get_bubble_generic_base_url(data_type, environment)
         if not base_url or not settings.BUBBLE_API_TOKEN:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1104,10 +1123,10 @@ async def get_processed_prompt_with_template(
             "Content-Type": "application/json"
         }
         
-        # URL for the specific PromptTemplate record
-        url = f"{base_url}/{template_id}"
+        # URL for the specific template record
+        url = f"{base_url}/{record_id}"
         
-        logger.info(f"Fetching PromptTemplate record with ID: {template_id} from environment: {environment}")
+        logger.info(f"Fetching {template_source} record with ID: {record_id} from environment: {environment}")
         
         # Make GET request to Bubble API
         response = requests.get(url, headers=headers, timeout=30)
@@ -1123,7 +1142,7 @@ async def get_processed_prompt_with_template(
                 if not json_template:
                     raise HTTPException(
                         status_code=status.HTTP_404_NOT_FOUND,
-                        detail=f"PromptTemplate record '{template_id}' does not have a json_template field or it's empty"
+                        detail=f"{template_source} record '{record_id}' does not have a json_template field or it's empty"
                     )
                 
             except json.JSONDecodeError as json_err:
@@ -1146,7 +1165,7 @@ async def get_processed_prompt_with_template(
         elif response.status_code == 404:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"PromptTemplate record with ID '{template_id}' not found"
+                detail=f"{template_source} record with ID '{record_id}' not found"
             )
         else:
             logger.error(f"Unexpected status code: {response.status_code}")
@@ -1156,15 +1175,15 @@ async def get_processed_prompt_with_template(
                 detail=f"Bubble API error: {response.status_code} - {response.text}"
             )
         
-        # Step 3: Replace {{JSON_STRUCTURE}} placeholder in the prompt
+        # Step 4: Replace {{JSON_STRUCTURE}} placeholder in the prompt
         processed_content = original_prompt_content.replace("{{JSON_STRUCTURE}}", json_template)
         
-        logger.info(f"Successfully processed prompt '{prompt_name}' with template '{template_id}'")
+        logger.info(f"Successfully processed prompt '{prompt_name}' with {template_source} '{record_id}'")
         
         return PromptTemplateProcessedResponse(
             success=True,
             prompt_name=prompt_name,
-            template_id=template_id,
+            template_id=record_id,  # This will be either template_id or prompttemplatecustom_id
             original_content=original_prompt_content,
             processed_content=processed_content,
             json_template=json_template,
