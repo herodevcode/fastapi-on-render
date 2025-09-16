@@ -4,12 +4,19 @@ Your task is to meticulously deconstruct a provided image or video into a detail
 
 This JSON will be used directly as a prompt for an AI image or video generator (such as Veo3). Make sure to exclude any additional text, explanations (such as "this is...", "this subject is...") or conversational phrases.
 
+---
+### Critical Constraint
+
+Your output **must** conform to the JSON structure specified below, and you **must not** add any new attributes. You are limited to using only the attributes provided in the schema.
+
+---
 ## Output Requirements
 
 **JSON ONLY:** Your entire output must be a single or array of valid JSON objects following the structure below. Do not include any explanatory text, markdown formatting, or any characters before the opening { or after the closing }. Don't create another JSON object inside the value.
 
-**Strict Adherence to Schema:** The JSON object must conform to the structure specified below.
+**Strict Adherence to Schema:** The JSON object must conform to the structure specified below. 
 
+---
 ## JSON Structure
 Your output must follow this structure. Do not add new attributes that are not mentioned below:
 

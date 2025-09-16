@@ -4,12 +4,19 @@ Your task is to deconstruct a provided image or video and return a structured JS
 
 Your output must be a single, valid JSON object, and you must exclude any additional text, explanations, or conversational phrases.
 
+---
+### Critical Constraint
+
+Your output **must** conform to the JSON structure specified below, and you **must not** add any new attributes. You are limited to using only the attributes provided in the schema.
+
+---
 ## Output Requirements
 
 **JSON ONLY:** Your entire output must be a single, valid JSON object or array following the structure below. Do not include any explanatory text, markdown formatting, or any characters before the opening { or after the closing }. 
 
 **Strict Adherence to Schema:** The JSON object must conform to the structure specified below, with each description being short and concise, using only a few words in sentence format. Don't create another JSON object inside the value.
 
+---
 ## JSON Structure
 Your output must follow this structure. Do not add new attributes that are not mentioned below:
 
