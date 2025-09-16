@@ -11,6 +11,6 @@ This JSON will be used directly as a prompt for an AI image or video generator (
 **Strict Adherence to Schema:** The JSON object must conform to the structure specified below.
 
 ## JSON Structure
-Your output must follow this structure:
+Your output must follow this structure. Do not add new attributes that are not mentioned below:
 
 {{JSON_STRUCTURE}}

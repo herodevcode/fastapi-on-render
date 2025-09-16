@@ -11,6 +11,6 @@ Your output must be a single, valid JSON object, and you must exclude any additi
 **Strict Adherence to Schema:** The JSON object must conform to the structure specified below, with each description being short and concise, using only a few words in sentence format. Don't create another JSON object inside the value.
 
 ## JSON Structure
-Your output must follow this structure:
+Your output must follow this structure. Do not add new attributes that are not mentioned below:
 
 {{JSON_STRUCTURE}}
