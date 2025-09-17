@@ -1,8 +1,4 @@
-{
-  "media_content_schema": [
-    { "attribute": "subject", "value": "..." },  
-    { "attribute": "environment", "value": "..." }, 
-    { "attribute": "style", "value": "..." }, 
-    { "attribute": "composition", "value": "..." }
-  ]
-}
+read this: https://cloudinary.com/documentation/video_trimming_and_concatenating
+
+write sample python script that upload this uri video by trimming down to 0-5 seconds
+https://dd55e155247f83b96954043c82c5bcb6.cdn.bubble.io/f1758076647592x506015112424890400/10%20seconds%201920x1080.mp4
