@@ -27,6 +27,7 @@ from models import (
 
 # Import routers
 from routers.sample_records import router as sample_records_router
+from routers.cloudinary_video import router as cloudinary_video_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -36,6 +37,7 @@ app = FastAPI()
 
 # Include routers
 app.include_router(sample_records_router)
+app.include_router(cloudinary_video_router)
 
 def get_bubble_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble API based on environment"""
@@ -468,7 +470,7 @@ async def create_promptfields_and_generated_prompts_batch(
                 successful_count = 0
                 creation_errors = []
                 
-                for i, resp in enumerate(parsed_responses):
+                for i, resp in parsed_responses:
                     if resp.get("status") == "success":
                         successful_count += 1
                         if "id" in resp:
