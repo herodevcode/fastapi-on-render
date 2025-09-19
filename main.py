@@ -543,7 +543,7 @@ async def create_promptfields_and_generated_prompts_batch(
                 successful_count = 0
                 creation_errors = []
                 
-                for i, resp in parsed_responses:
+                for i, resp in enumerate(parsed_responses):
                     if resp.get("status") == "success":
                         successful_count += 1
                         if "id" in resp:
@@ -800,13 +800,8 @@ async def process_and_update_api_request(
                     detail="Bubble API Request configuration is missing."
                 )
             
-            # Format JSON prompt field for Bubble (only for found PromptFields)
+            # Format JSON prompt field for Bubble (empty since no PromptFields found)
             json_prompt_formatted = []
-            for item in [attr for attr in request_data.attributes if any(r["attribute"] == attr.attribute for r in promptfield_results)]:
-                json_prompt_formatted.append({
-                    "attribute": item.attribute,
-                    "value": item.value
-                })
             
             # Prepare update payload
             update_payload = {
@@ -842,7 +837,8 @@ async def process_and_update_api_request(
                 "found_promptfields": 0,
                 "skipped_count": len(skipped_attributes),
                 "generated_prompt_ids": [],
-                "skipped": skipped_attributes
+                "skipped": skipped_attributes,
+                "api_request_update_status": update_response.status_code
             }
         
         # Step 2: Batch create GeneratedPrompts
@@ -918,18 +914,12 @@ async def process_and_update_api_request(
                 "total_attributes": len(request_data.attributes),
                 "promptfield_processing_successful": len(promptfield_results),
                 "generated_prompt_creation_successful": successful_gp_count,
-                "generated_prompt_creation_errors": gp_creation_errors
+                "generated_prompt_creation_errors": gp_creation_errors,
+                "skipped": skipped_attributes
             }
         
         # Step 3: Update API Request record with the results
         logger.info(f"Updating API Request {request_data.request_id} with {len(generated_prompt_ids)} GeneratedPrompt IDs")
-        
-        # Prepare update data for API Request
-        api_update_data = ApiRequestUpdate(
-            json_prompt=request_data.attributes,
-            generated_prompts=generated_prompt_ids,
-            bubble_environment=request_data.bubble_environment
-        )
         
         # Get API Request base URL
         api_request_base_url = get_bubble_api_request_base_url(request_data.bubble_environment)
@@ -939,18 +929,18 @@ async def process_and_update_api_request(
                 detail="Bubble API Request configuration is missing."
             )
         
-        # Format JSON prompt field for Bubble
+        # Format JSON prompt field for Bubble (include ALL attributes that were processed)
         json_prompt_formatted = []
-        for item in api_update_data.json_prompt:
+        for item in request_data.attributes:
             json_prompt_formatted.append({
                 "attribute": item.attribute,
                 "value": item.value
             })
         
-        # Prepare update payload
+        # Prepare update payload with GeneratedPrompts and Request Status
         update_payload = {
             "jsonPrompt": json.dumps(json_prompt_formatted),
-            "GeneratedPrompts": api_update_data.generated_prompts,
+            "GeneratedPrompts": generated_prompt_ids,
             "Request Status": "Completed"
         }
         
@@ -970,11 +960,13 @@ async def process_and_update_api_request(
             logger.error(f"Failed to update API Request: {update_response.text}")
             return {
                 "success": False,
-                "message": f"Successfully created PromptFields and GeneratedPrompts, but failed to update API Request: {update_response.status_code}",
+                "message": f"Successfully created GeneratedPrompts, but failed to update API Request: {update_response.status_code}",
                 "step": "api_request_update",
                 "generated_prompt_ids": generated_prompt_ids,
                 "update_error": update_response.text,
-                "partial_success": True
+                "partial_success": True,
+                "promptfield_results": promptfield_results,
+                "skipped": skipped_attributes
             }
         
         # Parse API Request update response
@@ -992,11 +984,14 @@ async def process_and_update_api_request(
             "message": f"Successfully processed {len(request_data.attributes)} attributes and updated API Request {request_data.request_id}",
             "request_id": request_data.request_id,
             "total_attributes": len(request_data.attributes),
+            "found_promptfields": len(promptfield_results),
+            "skipped_count": len(skipped_attributes),
             "promptfield_processing_successful": len(promptfield_results),
             "generated_prompt_creation_successful": successful_gp_count,
             "generated_prompt_ids": generated_prompt_ids,
             "api_request_update_status": update_response.status_code,
             "detailed_results": promptfield_results,
+            "skipped": skipped_attributes,
             "api_request_response": api_response_data
         }
         
