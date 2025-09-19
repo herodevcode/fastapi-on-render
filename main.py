@@ -100,7 +100,7 @@ async def process_promptfield_attributes(
     request_data: PromptFieldBatchRequest,
     api_key: str = Depends(get_api_key)
 ):
-    """Process a list of attribute-value pairs and return PromptField record IDs"""
+    """Process a list of attribute-value pairs and return PromptField record IDs (search only, no creation)"""
     
     if not settings.BUBBLE_PROMPTFIELD_DATA_TYPE:
         raise HTTPException(
@@ -110,19 +110,29 @@ async def process_promptfield_attributes(
     
     results = []
     errors = []
+    skipped = []
     
     logger.info(f"Processing {len(request_data.attributes)} PromptField attributes")
     
     for i, attr_value in enumerate(request_data.attributes):
         try:
-            record_id = await search_or_create_promptfield(attr_value.attribute, request_data.bubble_environment)
-            results.append({
-                "attribute": attr_value.attribute,
-                "value": attr_value.value,
-                "promptfield_id": record_id,
-                "index": i
-            })
-            
+            # Search only; do not create if missing
+            record_id = await search_promptfield_only(attr_value.attribute, request_data.bubble_environment)
+            if record_id:
+                results.append({
+                    "attribute": attr_value.attribute,
+                    "value": attr_value.value,
+                    "promptfield_id": record_id,
+                    "index": i
+                })
+            else:
+                skipped.append({
+                    "attribute": attr_value.attribute,
+                    "value": attr_value.value,
+                    "index": i,
+                    "reason": "PromptField not found"
+                })
+                logger.info(f"Skipping attribute '{attr_value.attribute}' - PromptField not found")
         except Exception as e:
             error_detail = {
                 "attribute": attr_value.attribute,
@@ -138,12 +148,14 @@ async def process_promptfield_attributes(
     
     response = {
         "success": len(errors) == 0,
-        "message": f"Processed {len(results)} attributes successfully" + (f", {len(errors)} errors" if errors else ""),
+        "message": f"Found {len(results)} PromptFields, skipped {len(skipped)}" + (f", {len(errors)} errors" if errors else ""),
         "total_processed": len(request_data.attributes),
         "successful_count": len(results),
+        "skipped_count": len(skipped),
         "error_count": len(errors),
         "promptfield_ids": promptfield_ids,
-        "detailed_results": results
+        "detailed_results": results,
+        "skipped": skipped
     }
     
     if errors:
@@ -151,71 +163,10 @@ async def process_promptfield_attributes(
     
     return response
 
-async def search_or_create_promptfield(attribute_name: str, environment: str = "version-test") -> str:
-    """Search for PromptField by name, create if not found, return record ID"""
-    
-    # Validate Bubble configuration
-    base_url = get_bubble_promptfield_base_url(environment)
-    if not base_url or not settings.BUBBLE_API_TOKEN:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Bubble PromptField API configuration is missing. Please check environment variables."
-        )
-    
-    headers = {
-        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    
-    # First, search for existing record
-    search_params = {
-        "constraints": json.dumps([{
-            "key": "Name",
-            "constraint_type": "equals",
-            "value": attribute_name
-        }]),
-        "limit": 1
-    }
-    
-    try:
-        # Search for existing record
-        search_response = requests.get(base_url, headers=headers, params=search_params, timeout=30)
-        
-        if search_response.status_code == 200:
-            search_data = search_response.json()
-            results = search_data.get("response", {}).get("results", [])
-            
-            if results:
-                # Record found, return its ID
-                record_id = results[0].get("_id")
-                logger.info(f"Found existing PromptField record for '{attribute_name}': {record_id}")
-                return record_id
-        
-        # No existing record found, create new one
-        logger.info(f"No existing PromptField found for '{attribute_name}', creating new record")
-        
-        create_payload = {
-            "Name": attribute_name
-        }
-        
-        create_response = requests.post(base_url, headers=headers, json=create_payload, timeout=30)
-        
-        if create_response.status_code == 201:
-            create_data = create_response.json()
-            new_record_id = create_data.get("id")
-            logger.info(f"Created new PromptField record for '{attribute_name}': {new_record_id}")
-            return new_record_id
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Failed to create PromptField record: {create_response.status_code} - {create_response.text}"
-            )
-            
-    except requests.exceptions.RequestException as e:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to connect to Bubble API: {str(e)}"
-        )
+async def search_or_create_promptfield(attribute_name: str, environment: str = "version-test") -> Optional[str]:
+    """Search for PromptField by name and return record ID if found. No creation if not found."""
+    # Delegate to the search-only helper to ensure no creation occurs.
+    return await search_promptfield_only(attribute_name, environment)
 
 async def search_promptfield_only(attribute_name: str, environment: str = "version-test") -> Optional[str]:
     """Search for PromptField by name, return record ID if found, None if not found (no creation)"""
@@ -541,7 +492,7 @@ async def create_promptfields_and_generated_prompts_batch(
                 successful_count = 0
                 creation_errors = []
                 
-                for i, resp in enumerate(parsed_responses):
+                for i, resp in parsed_responses:
                     if resp.get("status") == "success":
                         successful_count += 1
                         if "id" in resp:
@@ -1340,4 +1291,34 @@ async def get_processed_prompt_with_template(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to process prompt with template: {str(e)}"
+        )
+
+@app.get("/bubble/promptfields/search", tags=["bubble"])
+async def search_promptfield_endpoint(
+    attribute: str,
+    environment: str = "version-test",
+    api_key: str = Depends(get_api_key)
+):
+    """Search for a PromptField by attribute name. Returns its ID if found; otherwise None."""
+    if not settings.BUBBLE_PROMPTFIELD_DATA_TYPE:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="BUBBLE_PROMPTFIELD_DATA_TYPE is not configured. Please check environment variables."
+        )
+    try:
+        promptfield_id = await search_promptfield_only(attribute, environment)
+        return {
+            "success": True,
+            "attribute": attribute,
+            "environment": environment,
+            "found": bool(promptfield_id),
+            "promptfield_id": promptfield_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in search_promptfield_endpoint: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unexpected error: {str(e)}"
         )
