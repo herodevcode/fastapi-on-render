@@ -492,7 +492,7 @@ async def create_promptfields_and_generated_prompts_batch(
                 successful_count = 0
                 creation_errors = []
                 
-                for i, resp in enumerate(parsed_responses):
+                for i, resp in parsed_responses:
                     if resp.get("status") == "success":
                         successful_count += 1
                         if "id" in resp:
@@ -893,6 +893,16 @@ async def process_and_update_api_request(
             "Request Status": "Completed"
         }
         
+        # Console log the update payload details
+        logger.info(f"API Request update payload details:")
+        logger.info(f"  - Request ID: {request_data.request_id}")
+        logger.info(f"  - Environment: {request_data.bubble_environment}")
+        logger.info(f"  - Update URL: {api_request_base_url}/{request_data.request_id}")
+        logger.info(f"  - JSON Prompt count: {len(json_prompt_formatted)}")
+        logger.info(f"  - GeneratedPrompt IDs: {generated_prompt_ids}")
+        logger.info(f"  - GeneratedPrompt IDs count: {len(generated_prompt_ids)}")
+        logger.info(f"  - Full update payload: {update_payload}")
+        
         # URL for the specific API Request record
         update_url = f"{api_request_base_url}/{request_data.request_id}"
         update_headers = {
@@ -900,13 +910,19 @@ async def process_and_update_api_request(
             "Content-Type": "application/json"
         }
         
+        logger.info(f"Making PATCH request to update API Request...")
+        logger.info(f"  - Headers: {update_headers}")
+        
         # Make PATCH request to update API Request
         update_response = requests.patch(update_url, headers=update_headers, json=update_payload, timeout=30)
         
         logger.info(f"API Request update response status: {update_response.status_code}")
+        logger.info(f"API Request update response headers: {dict(update_response.headers)}")
+        logger.info(f"API Request update response content: {update_response.text}")
         
         if update_response.status_code not in [200, 204]:
             logger.error(f"Failed to update API Request: {update_response.text}")
+            logger.error(f"Update payload that failed: {update_payload}")
             return {
                 "success": False,
                 "message": f"Successfully created GeneratedPrompts, but failed to update API Request: {update_response.status_code}",
@@ -927,6 +943,9 @@ async def process_and_update_api_request(
         else:
             api_response_data = update_response.json()
         
+        logger.info(f"Successfully updated API Request {request_data.request_id}")
+        logger.info(f"API Request update response data: {api_response_data}")
+
         # Return comprehensive success response
         return {
             "success": True,
