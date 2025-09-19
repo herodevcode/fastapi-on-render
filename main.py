@@ -219,6 +219,56 @@ async def search_or_create_promptfield(attribute_name: str, environment: str = "
             detail=f"Failed to connect to Bubble API: {str(e)}"
         )
 
+async def search_promptfield_only(attribute_name: str, environment: str = "version-test") -> Optional[str]:
+    """Search for PromptField by name, return record ID if found, None if not found (no creation)"""
+    
+    # Validate Bubble configuration
+    base_url = get_bubble_promptfield_base_url(environment)
+    if not base_url or not settings.BUBBLE_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Bubble PromptField API configuration is missing. Please check environment variables."
+        )
+    
+    headers = {
+        "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # Search for existing record
+    search_params = {
+        "constraints": json.dumps([{
+            "key": "Name",
+            "constraint_type": "equals",
+            "value": attribute_name
+        }]),
+        "limit": 1
+    }
+    
+    try:
+        # Search for existing record
+        search_response = requests.get(base_url, headers=headers, params=search_params, timeout=30)
+        
+        if search_response.status_code == 200:
+            search_data = search_response.json()
+            results = search_data.get("response", {}).get("results", [])
+            
+            if results:
+                # Record found, return its ID
+                record_id = results[0].get("_id")
+                logger.info(f"Found existing PromptField record for '{attribute_name}': {record_id}")
+                return record_id
+        
+        # No existing record found, return None
+        logger.info(f"No existing PromptField found for '{attribute_name}', skipping creation")
+        return None
+            
+    except requests.exceptions.RequestException as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to connect to Bubble API: {str(e)}"
+        )
+
 @app.post("/bubble/generated-prompts/batch", tags=["bubble"])
 async def create_generated_prompts_batch(
     batch_data: GeneratedPromptBatchCreate, 
@@ -362,7 +412,7 @@ async def create_promptfields_and_generated_prompts_batch(
     request_data: PromptFieldAndGeneratedPromptBatchCreate,
     api_key: str = Depends(get_api_key)
 ):
-    """Process attributes to create/find PromptFields and create corresponding GeneratedPrompts, returning GeneratedPrompt IDs"""
+    """Search for existing PromptFields (no creation) and create corresponding GeneratedPrompts for found ones only"""
     
     if not settings.BUBBLE_PROMPTFIELD_DATA_TYPE or not settings.BUBBLE_GENERATEDPROMPT_DATA_TYPE:
         raise HTTPException(
@@ -372,28 +422,39 @@ async def create_promptfields_and_generated_prompts_batch(
     
     generated_prompt_records = []
     results = []
+    skipped = []
     errors = []
     
-    logger.info(f"Processing {len(request_data.attributes)} attributes for PromptField and GeneratedPrompt creation")
+    logger.info(f"Processing {len(request_data.attributes)} attributes for PromptField search and GeneratedPrompt creation")
     
-    # Step 1: Process each attribute to get/create PromptField and prepare GeneratedPrompt data
+    # Step 1: Process each attribute to search for existing PromptField and prepare GeneratedPrompt data
     for i, attr_value in enumerate(request_data.attributes):
         try:
-            # Get or create PromptField
-            promptfield_id = await search_or_create_promptfield(attr_value.attribute, request_data.bubble_environment)
+            # Search for existing PromptField only (no creation)
+            promptfield_id = await search_promptfield_only(attr_value.attribute, request_data.bubble_environment)
             
-            # Prepare GeneratedPrompt record
-            generated_prompt_records.append(GeneratedPromptCreate(
-                promptfield_id=promptfield_id,
-                value=attr_value.value
-            ))
-            
-            results.append({
-                "attribute": attr_value.attribute,
-                "value": attr_value.value,
-                "promptfield_id": promptfield_id,
-                "index": i
-            })
+            if promptfield_id:
+                # PromptField found, prepare GeneratedPrompt record
+                generated_prompt_records.append(GeneratedPromptCreate(
+                    promptfield_id=promptfield_id,
+                    value=attr_value.value
+                ))
+                
+                results.append({
+                    "attribute": attr_value.attribute,
+                    "value": attr_value.value,
+                    "promptfield_id": promptfield_id,
+                    "index": i
+                })
+            else:
+                # PromptField not found, skip this attribute
+                skipped.append({
+                    "attribute": attr_value.attribute,
+                    "value": attr_value.value,
+                    "index": i,
+                    "reason": "PromptField not found"
+                })
+                logger.info(f"Skipping attribute '{attr_value.attribute}' - PromptField not found")
             
         except Exception as e:
             error_detail = {
@@ -405,26 +466,38 @@ async def create_promptfields_and_generated_prompts_batch(
             errors.append(error_detail)
             logger.error(f"Error processing attribute '{attr_value.attribute}': {str(e)}")
     
-    # If we have errors in PromptField processing, return early
-    if errors:
+    # If we have no PromptFields found and no errors, return early
+    if not generated_prompt_records and not errors:
         return {
-            "success": False,
-            "message": f"Failed to process {len(errors)} out of {len(request_data.attributes)} attributes",
+            "success": True,
+            "message": f"No existing PromptFields found for any of the {len(request_data.attributes)} attributes",
             "total_processed": len(request_data.attributes),
-            "successful_promptfield_count": len(results),
-            "error_count": len(errors),
-            "errors": errors,
-            "generated_prompt_ids": []
+            "found_promptfields": 0,
+            "skipped_count": len(skipped),
+            "error_count": 0,
+            "generated_prompt_ids": [],
+            "skipped": skipped
         }
     
-    # Step 2: Batch create GeneratedPrompts
-    try:
-        batch_create_data = GeneratedPromptBatchCreate(
-            records=generated_prompt_records,
-            bubble_environment=request_data.bubble_environment
-        )
+    # If we have errors in PromptField processing, include them in response
+    if errors:
+        response = {
+            "success": len(generated_prompt_records) > 0,
+            "message": f"Found {len(results)} PromptFields, skipped {len(skipped)}, {len(errors)} errors",
+            "total_processed": len(request_data.attributes),
+            "found_promptfields": len(results),
+            "skipped_count": len(skipped),
+            "error_count": len(errors),
+            "errors": errors,
+            "skipped": skipped,
+            "generated_prompt_ids": []
+        }
         
-        # Use the existing batch create logic
+        if not generated_prompt_records:
+            return response
+    
+    # Step 2: Batch create GeneratedPrompts for found PromptFields
+    try:
         base_url = get_bubble_generatedprompt_base_url(request_data.bubble_environment)
         if not base_url or not settings.BUBBLE_API_TOKEN:
             raise HTTPException(
@@ -487,13 +560,16 @@ async def create_promptfields_and_generated_prompts_batch(
                 
                 return {
                     "success": successful_count == len(generated_prompt_records),
-                    "message": f"Successfully created {successful_count} out of {len(generated_prompt_records)} GeneratedPrompt records",
+                    "message": f"Found {len(results)} PromptFields, skipped {len(skipped)}, successfully created {successful_count} GeneratedPrompt records",
                     "total_attributes": len(request_data.attributes),
-                    "promptfield_processing_successful": len(results),
+                    "found_promptfields": len(results),
+                    "skipped_count": len(skipped),
                     "generated_prompt_creation_successful": successful_count,
                     "generated_prompt_ids": generated_prompt_ids,
                     "detailed_results": results,
-                    "creation_errors": creation_errors if creation_errors else None
+                    "skipped": skipped,
+                    "creation_errors": creation_errors if creation_errors else None,
+                    "errors": errors if errors else None
                 }
                 
             except json.JSONDecodeError as json_err:
@@ -503,7 +579,9 @@ async def create_promptfields_and_generated_prompts_batch(
                     "message": "GeneratedPrompt batch creation completed but response parsing failed",
                     "generated_prompt_ids": [],
                     "raw_response": response.text,
-                    "error": str(json_err)
+                    "error": str(json_err),
+                    "skipped": skipped,
+                    "found_promptfields": len(results)
                 }
         else:
             raise HTTPException(
@@ -640,19 +718,12 @@ async def process_and_update_api_request(
     request_data: ApiRequestProcessAndUpdate,
     api_key: str = Depends(get_api_key)
 ):
-    """Process attributes to create PromptFields and GeneratedPrompts, then update the API Request record with the results"""
+    """Search for existing PromptFields (no creation) and create GeneratedPrompts, then update the API Request record with the results"""
     
     try:
-        # Step 1: Process attributes to create PromptFields and GeneratedPrompts
+        # Step 1: Search for existing PromptFields and create GeneratedPrompts
         logger.info(f"Processing {len(request_data.attributes)} attributes for API Request {request_data.request_id}")
         
-        # Create the batch request data for PromptFields and GeneratedPrompts
-        batch_request = PromptFieldAndGeneratedPromptBatchCreate(
-            attributes=request_data.attributes,
-            bubble_environment=request_data.bubble_environment
-        )
-        
-        # Call the existing logic for creating PromptFields and GeneratedPrompts
         if not settings.BUBBLE_PROMPTFIELD_DATA_TYPE or not settings.BUBBLE_GENERATEDPROMPT_DATA_TYPE:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -661,26 +732,37 @@ async def process_and_update_api_request(
         
         generated_prompt_records = []
         promptfield_results = []
+        skipped_attributes = []
         promptfield_errors = []
         
-        # Process each attribute to get/create PromptField and prepare GeneratedPrompt data
+        # Process each attribute to search for existing PromptField and prepare GeneratedPrompt data
         for i, attr_value in enumerate(request_data.attributes):
             try:
-                # Get or create PromptField
-                promptfield_id = await search_or_create_promptfield(attr_value.attribute, request_data.bubble_environment)
+                # Search for existing PromptField only (no creation)
+                promptfield_id = await search_promptfield_only(attr_value.attribute, request_data.bubble_environment)
                 
-                # Prepare GeneratedPrompt record
-                generated_prompt_records.append(GeneratedPromptCreate(
-                    promptfield_id=promptfield_id,
-                    value=attr_value.value
-                ))
-                
-                promptfield_results.append({
-                    "attribute": attr_value.attribute,
-                    "value": attr_value.value,
-                    "promptfield_id": promptfield_id,
-                    "index": i
-                })
+                if promptfield_id:
+                    # PromptField found, prepare GeneratedPrompt record
+                    generated_prompt_records.append(GeneratedPromptCreate(
+                        promptfield_id=promptfield_id,
+                        value=attr_value.value
+                    ))
+                    
+                    promptfield_results.append({
+                        "attribute": attr_value.attribute,
+                        "value": attr_value.value,
+                        "promptfield_id": promptfield_id,
+                        "index": i
+                    })
+                else:
+                    # PromptField not found, skip this attribute
+                    skipped_attributes.append({
+                        "attribute": attr_value.attribute,
+                        "value": attr_value.value,
+                        "index": i,
+                        "reason": "PromptField not found"
+                    })
+                    logger.info(f"Skipping attribute '{attr_value.attribute}' - PromptField not found")
                 
             except Exception as e:
                 error_detail = {
@@ -699,9 +781,68 @@ async def process_and_update_api_request(
                 "message": f"Failed to process {len(promptfield_errors)} out of {len(request_data.attributes)} attributes",
                 "step": "promptfield_processing",
                 "total_processed": len(request_data.attributes),
-                "successful_promptfield_count": len(promptfield_results),
+                "found_promptfields": len(promptfield_results),
+                "skipped_count": len(skipped_attributes),
                 "error_count": len(promptfield_errors),
-                "errors": promptfield_errors
+                "errors": promptfield_errors,
+                "skipped": skipped_attributes
+            }
+        
+        # If no PromptFields were found, update API Request with empty results
+        if not generated_prompt_records:
+            logger.info(f"No existing PromptFields found for any attributes, updating API Request {request_data.request_id} with empty results")
+            
+            # Get API Request base URL
+            api_request_base_url = get_bubble_api_request_base_url(request_data.bubble_environment)
+            if not api_request_base_url:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Bubble API Request configuration is missing."
+                )
+            
+            # Format JSON prompt field for Bubble (only for found PromptFields)
+            json_prompt_formatted = []
+            for item in [attr for attr in request_data.attributes if any(r["attribute"] == attr.attribute for r in promptfield_results)]:
+                json_prompt_formatted.append({
+                    "attribute": item.attribute,
+                    "value": item.value
+                })
+            
+            # Prepare update payload
+            update_payload = {
+                "jsonPrompt": json.dumps(json_prompt_formatted),
+                "GeneratedPrompts": [],
+                "Request Status": "Completed - No Matching PromptFields"
+            }
+            
+            # URL for the specific API Request record
+            update_url = f"{api_request_base_url}/{request_data.request_id}"
+            update_headers = {
+                "Authorization": f"Bearer {settings.BUBBLE_API_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            
+            # Make PATCH request to update API Request
+            update_response = requests.patch(update_url, headers=update_headers, json=update_payload, timeout=30)
+            
+            if update_response.status_code not in [200, 204]:
+                logger.error(f"Failed to update API Request: {update_response.text}")
+                return {
+                    "success": False,
+                    "message": f"No PromptFields found and failed to update API Request: {update_response.status_code}",
+                    "step": "api_request_update",
+                    "update_error": update_response.text
+                }
+            
+            return {
+                "success": True,
+                "message": f"No existing PromptFields found for any of {len(request_data.attributes)} attributes, API Request updated with empty results",
+                "request_id": request_data.request_id,
+                "total_attributes": len(request_data.attributes),
+                "found_promptfields": 0,
+                "skipped_count": len(skipped_attributes),
+                "generated_prompt_ids": [],
+                "skipped": skipped_attributes
             }
         
         # Step 2: Batch create GeneratedPrompts

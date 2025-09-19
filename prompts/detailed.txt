@@ -18,6 +18,6 @@ Your output **must** conform to the JSON structure specified below, and you **mu
 
 ---
 ## JSON Structure
-Your output must follow this structure. Do not add new attributes that are not mentioned below:
+Your output must follow this structure. Do not add new attributes that are not mentioned below. Only attributes mentioned below can be output:
 
 {{JSON_STRUCTURE}}
