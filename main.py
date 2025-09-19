@@ -492,7 +492,7 @@ async def create_promptfields_and_generated_prompts_batch(
                 successful_count = 0
                 creation_errors = []
                 
-                for i, resp in parsed_responses:
+                for i, resp in enumerate(parsed_responses):
                     if resp.get("status") == "success":
                         successful_count += 1
                         if "id" in resp:
