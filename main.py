@@ -27,7 +27,6 @@ from models import (
 
 # Import routers
 from routers.sample_records import router as sample_records_router
-from routers.cloudinary_video import router as cloudinary_video_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -37,7 +36,6 @@ app = FastAPI()
 
 # Include routers
 app.include_router(sample_records_router)
-app.include_router(cloudinary_video_router)
 
 def get_bubble_base_url(environment: str = "version-test"):
     """Get the base URL for Bubble API based on environment"""

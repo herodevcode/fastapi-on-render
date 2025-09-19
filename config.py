@@ -19,10 +19,5 @@ class Settings(BaseSettings):
     BUBBLE_ENVIRONMENT: str = "production"
     BUBBLE_PROMPTTEMPLATECUSTOM_DATA_TYPE: str = "prompttemplatecustom"
 
-    # Cloudinary configuration
-    CLOUDINARY_CLOUD_NAME: str = None
-    CLOUDINARY_API_KEY: str = None
-    CLOUDINARY_API_SECRET: str = None
-
 # Create a single instance to be imported in other files
 settings = Settings()
